@@ -6,6 +6,10 @@ Live at https://stevenjk.github.io/sonic-feels/ via GitHub Pages (branch `main`,
 The **entire app is a single file: `index.html`** — HTML, CSS and JS inline. No build
 step, no dependencies, no framework. Keep it that way.
 
+The only other files are the ones a PWA can't do without, because the browser insists
+they be separate: `manifest.webmanifest`, `sw.js`, and `icons/`. No app logic lives in
+them. Everything the app *does* still belongs in `index.html`.
+
 ## The idea
 Capture a moment as a **photo plus ten seconds of the ambient sound of that place**,
 stamped with time and GPS. Later, replay it — the sound is what triggers the memory of
@@ -27,6 +31,9 @@ No accounts, no backend, no analytics. Do not add any.
 - **Backup** — export/import all moments as one JSON file (blobs base64'd).
 - **Share** — renders a real video (canvas + muxed audio via MediaRecorder,
   1080x1350, slow Ken Burns) for Instagram. Prefers mp4, falls back to webm.
+- **Installable PWA** — manifest (standalone, portrait, warm palette, dot-and-rings
+  icon) plus a service worker that caches the app shell. Add to Home Screen gives a
+  real app window, and it opens and captures with no signal at all.
 
 ## Hard-won constraints — DO NOT REGRESS THESE
 These cost many rounds of debugging. Every one is load-bearing.
@@ -57,26 +64,36 @@ These cost many rounds of debugging. Every one is load-bearing.
 6. **The share video needs motion.** A fully static canvas can stop emitting frames and
    produce a broken video — the slow Ken Burns zoom keeps `captureStream` alive.
 
+7. **The service worker only ever touches our own files.** It ignores anything that
+   isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
+   and `data:` URLs the camera, the player and the backup importer pass around. It is
+   still true that the app makes zero calls to anything but itself.
+
 ## Deployment
 GitHub Pages, branch `main`, root, file must be lowercase `index.html`.
 Note: camera/mic/GPS require HTTPS, so it only works from the Pages URL, never `file://`.
+Every path is relative (`./`), so the app doesn't care that Pages serves it from the
+`/sonic-feels/` subfolder.
+
+Updating: the service worker serves the cached copy first and refreshes it in the
+background, so a change to `index.html` shows up the **second** time the app is opened
+after a deploy. Bumping `VERSION` in `sw.js` throws the old copy away cleanly.
 
 ## What I want next (roughly in order)
-1. **Manifest + service worker** — proper installable PWA: icon, standalone display,
-   offline capture. Matters because I'll use this travelling with no signal.
-2. **Trip timeline** — string moments into a scrubbable journey on a map: drag through
+1. **Trip timeline** — string moments into a scrubbable journey on a map: drag through
    time and the photo, the place and the sound change together. This was the original
    vision and isn't built yet.
-3. **Random nudge notifications** — prompt me at random times to capture a moment,
+2. **Random nudge notifications** — prompt me at random times to capture a moment,
    since I have the habit of taking photos but not of capturing sound. Needs a small
    push scheduler; background *capture* is impossible on Android and is not the goal —
-   the nudge just opens the app to the capture screen.
-4. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
+   the nudge just opens the app to the capture screen. (The service worker is now in
+   place, which is what would show the notification.)
+3. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
    any music in a clip. Deliberately optional — the raw sound is the artifact, and a
    busker or a street will never be recognisable.
 
 ## Style notes
-- Single file. No dependencies. No frameworks. No network calls.
+- All app logic in one file. No dependencies. No frameworks. No network calls.
 - Dark, warm palette: ink `#14110d`, paper `#f4efe6`, accent `#e0895f`. Georgia serif
   for text, monospace for labels and metadata.
 - Keep it terse and readable — I'm not a developer and I read this code on a phone.

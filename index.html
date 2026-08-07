@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sonic Moments</title>
+<meta name="description" content="A photo you can hear. Ten seconds of picture and sound, pinned to a time and a place, kept on this device.">
+<!-- installable PWA: manifest + icons live beside this file -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#14110d">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sonic Moments">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root {
     --ink: #14110d;
@@ -19,7 +29,12 @@
     font-family: Georgia, 'Times New Roman', serif;
     min-height: 100vh; display: flex; justify-content: center;
   }
-  #app { width: 100%; max-width: 430px; padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 16px; }
+  /* the env() padding keeps the header clear of the notch when it's
+     running installed, with no status bar to push it down */
+  #app {
+    width: 100%; max-width: 430px; display: flex; flex-direction: column; gap: 16px;
+    padding: calc(20px + env(safe-area-inset-top)) 18px calc(40px + env(safe-area-inset-bottom));
+  }
 
   .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
   h1 { font-size: 28px; font-weight: 400; line-height: 1.1; }
@@ -865,6 +880,18 @@ els.btnRecord.onclick = () => (mode === "photo" ? recordPhotoMode() : record());
 els.btnExport.onclick = exportBackup;
 els.fileImport.onchange = (e) => importBackup(e.target.files[0]);
 els.btnShare.onclick = () => { if (current) shareVideo(current); };
+
+// ── offline / installable ────────────────────────────────────
+// Registers the service worker, which keeps a copy of this page and its
+// icons on the device so the app opens and captures with no signal. It
+// caches nothing but our own files. Skipped over file://, where service
+// workers aren't allowed anyway, and failures are ignored — the app
+// works exactly the same without it.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
 
 startGPS();
 startCamera();
