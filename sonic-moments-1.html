@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sonic Moments</title>
+<style>
+  :root {
+    --ink: #14110d;
+    --paper: #f4efe6;
+    --accent: #e0895f;
+    --card: #1a1611;
+    --line: #2a2620;
+    --mono: ui-monospace, 'Cascadia Mono', 'Roboto Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--ink); color: var(--paper);
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh; display: flex; justify-content: center;
+  }
+  #app { width: 100%; max-width: 430px; padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 16px; }
+
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: 28px; font-weight: 400; line-height: 1.1; }
+  .sub { font-size: 14px; opacity: .55; line-height: 1.5; }
+
+  nav { display: flex; gap: 8px; }
+  nav button {
+    flex: 1; background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 20px; padding: 9px 0; font-family: var(--mono); font-size: 12px;
+    letter-spacing: .08em; cursor: pointer;
+  }
+  nav button.on { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 700; }
+
+  .stage {
+    position: relative; aspect-ratio: 3/4; background: #000;
+    border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+  }
+  .stage video, .stage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .badge {
+    position: absolute; top: 10px; left: 12px; font-family: var(--mono);
+    font-size: 11px; letter-spacing: .1em; color: #fff; text-shadow: 0 1px 3px #000;
+  }
+  .reclight {
+    position: absolute; top: 10px; right: 12px; width: 10px; height: 10px; border-radius: 50%;
+    background: #e5484d; animation: pulse 1s infinite; display: none;
+  }
+  .reclight.on { display: block; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .bigbtn {
+    background: var(--accent); color: var(--ink); border: none; border-radius: 26px;
+    padding: 14px 0; width: 100%; font-family: var(--mono); font-size: 13px;
+    letter-spacing: .1em; font-weight: 700; cursor: pointer;
+  }
+  .bigbtn:disabled { opacity: .4; cursor: default; }
+  .ghost {
+    background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 26px; padding: 12px 18px; font-family: var(--mono); font-size: 12px; cursor: pointer;
+  }
+  .meta { font-family: var(--mono); font-size: 11.5px; opacity: .55; line-height: 1.7; }
+  .warn { font-family: var(--mono); font-size: 12px; color: #e0a95f; line-height: 1.5; }
+
+  .strip { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+  .strip img {
+    width: 42px; height: 42px; flex-shrink: 0; border-radius: 4px; object-fit: cover;
+    opacity: .5; cursor: pointer; outline: 2px solid transparent;
+  }
+  .strip img.on { opacity: 1; outline-color: var(--accent); }
+
+  .atom {
+    display: flex; gap: 12px; align-items: center; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px; cursor: pointer;
+  }
+  .atom img { width: 60px; height: 60px; border-radius: 6px; object-fit: cover; }
+  .atom .t { font-size: 15px; }
+  .atom .d { font-family: var(--mono); font-size: 11px; opacity: .55; margin-top: 3px; }
+  .atom .del {
+    margin-left: auto; background: none; border: none; color: var(--paper);
+    opacity: .35; font-size: 18px; cursor: pointer; padding: 8px;
+  }
+
+  .mapbox {
+    aspect-ratio: 16/9; background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .empty {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 36px 20px;
+    text-align: center; font-size: 15px; opacity: .6; line-height: 1.6;
+  }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div>
+    <div class="eyebrow">Sonic Moments</div>
+    <h1 id="heading">Capture where you are.</h1>
+    <p class="sub" id="subtext">Ten seconds of picture and sound, pinned to this time and place. All of it stays on this device.</p>
+  </div>
+
+  <nav>
+    <button id="tabCapture" class="on">CAPTURE</button>
+    <button id="tabReplay">MOMENTS</button>
+  </nav>
+
+  <!-- ── CAPTURE ─────────────────────────────── -->
+  <section id="viewCapture">
+    <div class="stage">
+      <video id="preview" autoplay muted playsinline></video>
+      <div class="badge" id="capBadge"></div>
+      <div class="reclight" id="recLight"></div>
+    </div>
+    <div style="height:12px"></div>
+    <button class="bigbtn" id="btnRecord" disabled>STARTING CAMERA…</button>
+    <div style="height:10px"></div>
+    <div class="meta" id="capMeta">location · waiting for GPS…</div>
+    <div class="warn hide" id="capWarn"></div>
+  </section>
+
+  <!-- ── REPLAY: one moment ──────────────────── -->
+  <section id="viewPlayer" class="hide">
+    <div class="stage">
+      <img id="playFrame" alt="moment frame">
+      <div class="badge" id="playBadge"></div>
+    </div>
+    <div style="height:10px"></div>
+    <div class="strip" id="playStrip"></div>
+    <div style="height:10px"></div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="bigbtn" id="btnPlay" style="flex:1">REPLAY MOMENT</button>
+      <button class="ghost" id="btnBack">All moments</button>
+    </div>
+    <div style="height:10px"></div>
+    <div class="meta" id="playMeta"></div>
+    <audio id="playAudio" preload="auto"></audio>
+  </section>
+
+  <!-- ── REPLAY: library ─────────────────────── -->
+  <section id="viewLibrary" class="hide">
+    <div class="mapbox"><svg id="map" viewBox="0 0 100 56.25" preserveAspectRatio="none" style="width:100%;height:100%"></svg></div>
+    <div style="height:14px"></div>
+    <div id="atomList" style="display:flex; flex-direction:column; gap:10px;"></div>
+    <div class="empty hide" id="emptyState">No moments yet.<br>Capture your first one — ten seconds, wherever you're standing.</div>
+  </section>
+</div>
+
+<script>
+"use strict";
+// ═══════════════════════════════════════════════════════════════
+// SONIC MOMENTS — all local. Camera+mic via getUserMedia, GPS via
+// Geolocation, frames pulled per-second onto canvas, everything
+// stored in IndexedDB. No network calls anywhere in this file.
+// ═══════════════════════════════════════════════════════════════
+
+const CLIP_SECONDS = 10;
+
+// ── tiny IndexedDB layer ─────────────────────────────────────
+const db = {
+  _p: null,
+  open() {
+    if (this._p) return this._p;
+    this._p = new Promise((res, rej) => {
+      const r = indexedDB.open("sonic-moments", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("atoms", { keyPath: "id" });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return this._p;
+  },
+  async put(atom) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const tx = d.transaction("atoms", "readwrite");
+      tx.objectStore("atoms").put(atom);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  },
+  async all() {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const rq = d.transaction("atoms").objectStore("atoms").getAll();
+      rq.onsuccess = () => res(rq.result.sort((a, b) => a.t - b.t));
+      rq.onerror = () => rej(rq.error);
+    });
+  },
+  async del(id) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const tx = d.transaction("atoms", "readwrite");
+      tx.objectStore("atoms").delete(id);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  }
+};
+
+// ── element handles ──────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const els = {
+  tabCapture: $("tabCapture"), tabReplay: $("tabReplay"),
+  viewCapture: $("viewCapture"), viewPlayer: $("viewPlayer"), viewLibrary: $("viewLibrary"),
+  preview: $("preview"), capBadge: $("capBadge"), recLight: $("recLight"),
+  btnRecord: $("btnRecord"), capMeta: $("capMeta"), capWarn: $("capWarn"),
+  playFrame: $("playFrame"), playBadge: $("playBadge"), playStrip: $("playStrip"),
+  btnPlay: $("btnPlay"), btnBack: $("btnBack"), playMeta: $("playMeta"), playAudio: $("playAudio"),
+  map: $("map"), atomList: $("atomList"), emptyState: $("emptyState"),
+  heading: $("heading"), subtext: $("subtext"),
+};
+
+// ── state ────────────────────────────────────────────────────
+let stream = null, recorder = null, chunks = [];
+let lastFix = null;          // { lat, lng, acc }
+let current = null;          // atom being replayed
+let playRAF = null, playIdx = -1;
+let objectURLs = [];         // revoke on view change
+
+function fmtWhen(t) {
+  return new Date(t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+function fmtCoord(a) {
+  if (!a.lat) return "no location captured";
+  return a.lat.toFixed(5) + ", " + a.lng.toFixed(5) + (a.acc ? "  ±" + Math.round(a.acc) + "m" : "");
+}
+function releaseURLs() { objectURLs.forEach(URL.revokeObjectURL); objectURLs = []; }
+function makeURL(blob) { const u = URL.createObjectURL(blob); objectURLs.push(u); return u; }
+
+// ── GPS: keep a rolling fix so capture stamps instantly ──────
+function startGPS() {
+  if (!("geolocation" in navigator)) {
+    els.capMeta.textContent = "location · not available on this device";
+    return;
+  }
+  navigator.geolocation.watchPosition(
+    (p) => {
+      lastFix = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+      els.capMeta.textContent = "location · " + fmtCoord(lastFix);
+    },
+    () => { els.capMeta.textContent = "location · permission needed (moment still saves without it)"; },
+    { enableHighAccuracy: true, maximumAge: 15000 }
+  );
+}
+
+// ── camera boot ──────────────────────────────────────────────
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 } },
+      audio: true
+    });
+    els.preview.srcObject = stream;
+    els.btnRecord.disabled = false;
+    els.btnRecord.textContent = "CAPTURE " + CLIP_SECONDS + "s";
+  } catch (e) {
+    els.btnRecord.textContent = "CAMERA BLOCKED";
+    els.capWarn.classList.remove("hide");
+    els.capWarn.textContent =
+      "Camera or mic was blocked. If this is running inside a sandboxed preview, permissions may not reach the page — the same file works when opened directly in Chrome or hosted. Otherwise check site permissions and reload.";
+  }
+}
+
+// ── record → decompose → store ───────────────────────────────
+function record() {
+  if (!stream) return;
+  chunks = [];
+  const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+    ? "video/webm;codecs=vp8,opus" : "";
+  recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = onRecorded;
+
+  const t0 = Date.now();
+  els.recLight.classList.add("on");
+  els.btnRecord.disabled = true;
+  const tick = setInterval(() => {
+    const left = CLIP_SECONDS - Math.floor((Date.now() - t0) / 1000);
+    els.btnRecord.textContent = "RECORDING… " + Math.max(left, 0) + "s";
+    if (left <= 0) { clearInterval(tick); recorder.stop(); }
+  }, 250);
+  recorder.start();
+}
+
+async function onRecorded() {
+  els.recLight.classList.remove("on");
+  els.btnRecord.textContent = "SAVING…";
+  const blob = new Blob(chunks, { type: chunks[0]?.type || "video/webm" });
+  const when = Date.now();
+  const fix = lastFix || { lat: null, lng: null, acc: null };
+
+  let frames = [];
+  try { frames = await extractFrames(blob); }
+  catch (e) { /* frames can fail on odd codecs; audio+meta still save */ }
+
+  const atom = {
+    id: "a" + when,
+    t: when,
+    lat: fix.lat, lng: fix.lng, acc: fix.acc,
+    frames,                    // array of jpeg Blobs
+    audio: blob,               // full clip blob doubles as the audio source
+    seconds: CLIP_SECONDS,
+  };
+  await db.put(atom);
+  els.btnRecord.disabled = false;
+  els.btnRecord.textContent = "CAPTURE " + CLIP_SECONDS + "s";
+  showView("library");
+}
+
+// pull one frame per second off the recorded blob via a hidden <video>
+function extractFrames(blob) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.src = URL.createObjectURL(blob);
+    v.muted = true; v.playsInline = true;
+    const frames = [];
+    let canvas, ctx, count, i = 0, dur;
+
+    v.onloadedmetadata = () => {
+      dur = (isFinite(v.duration) && v.duration > 0) ? Math.min(v.duration, CLIP_SECONDS + 2) : CLIP_SECONDS;
+      count = Math.max(1, Math.round(Math.min(dur, CLIP_SECONDS)));
+      canvas = document.createElement("canvas");
+      canvas.width = v.videoWidth || 720; canvas.height = v.videoHeight || 960;
+      ctx = canvas.getContext("2d");
+      seekNext();
+    };
+    v.onerror = () => reject(new Error("decode failed"));
+    v.onseeked = () => {
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((b) => {
+        frames.push(b);
+        i++;
+        if (i >= count) { URL.revokeObjectURL(v.src); resolve(frames); }
+        else seekNext();
+      }, "image/jpeg", 0.82);
+    };
+    function seekNext() { v.currentTime = Math.min(i + 0.5, dur - 0.05); }
+  });
+}
+
+// ── library ──────────────────────────────────────────────────
+async function renderLibrary() {
+  releaseURLs();
+  const atoms = await db.all();
+  els.atomList.innerHTML = "";
+  els.emptyState.classList.toggle("hide", atoms.length > 0);
+  drawMap(atoms);
+
+  for (const a of atoms) {
+    const row = document.createElement("div");
+    row.className = "atom";
+    const thumb = document.createElement("img");
+    if (a.frames && a.frames[0]) thumb.src = makeURL(a.frames[0]);
+    thumb.alt = "moment thumbnail";
+    const txt = document.createElement("div");
+    txt.innerHTML = '<div class="t">' + fmtWhen(a.t) + '</div><div class="d">' + fmtCoord(a) + "</div>";
+    const del = document.createElement("button");
+    del.className = "del"; del.textContent = "×"; del.setAttribute("aria-label", "Delete this moment");
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (confirm("Delete this moment? It can't be recovered.")) { await db.del(a.id); renderLibrary(); }
+    };
+    row.append(thumb, txt, del);
+    row.onclick = () => openPlayer(a);
+    els.atomList.appendChild(row);
+  }
+}
+
+function drawMap(atoms) {
+  const svg = els.map;
+  svg.innerHTML = "";
+  const located = atoms.filter((a) => a.lat != null);
+  if (located.length === 0) return;
+  const lats = located.map((a) => a.lat), lngs = located.map((a) => a.lng);
+  const mnLa = Math.min(...lats), mxLa = Math.max(...lats);
+  const mnLo = Math.min(...lngs), mxLo = Math.max(...lngs);
+  const pad = 0.14;
+  const px = (a) => ((a.lng - mnLo) / ((mxLo - mnLo) || 1)) * (100 * (1 - 2 * pad)) + 100 * pad;
+  const py = (a) => (1 - (a.lat - mnLa) / ((mxLa - mnLa) || 1)) * (56.25 * (1 - 2 * pad)) + 56.25 * pad;
+
+  if (located.length > 1) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    line.setAttribute("points", located.map((a) => px(a) + "," + py(a)).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "#4a3f34");
+    line.setAttribute("stroke-width", "0.6");
+    line.setAttribute("stroke-dasharray", "2 1.5");
+    svg.appendChild(line);
+  }
+  located.forEach((a) => {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", px(a)); c.setAttribute("cy", py(a)); c.setAttribute("r", "1.6");
+    c.setAttribute("fill", "#e0895f");
+    svg.appendChild(c);
+  });
+}
+
+// ── player ───────────────────────────────────────────────────
+function openPlayer(atom) {
+  current = atom;
+  stopPlayback();
+  releaseURLs();
+  showView("player");
+
+  els.playStrip.innerHTML = "";
+  const urls = (atom.frames || []).map((b) => makeURL(b));
+  // decode every frame up front — swapping a pre-decoded image is instant,
+  // so the picture never blocks the audio thread mid-playback
+  urls.forEach((u) => { const pre = new Image(); pre.src = u; });
+  urls.forEach((u, i) => {
+    const im = document.createElement("img");
+    im.src = u; im.alt = "second " + (i + 1);
+    im.onclick = () => { stopPlayback(); setFrame(i); };
+    els.playStrip.appendChild(im);
+  });
+  els.playAudio.src = makeURL(atom.audio);
+  els.playMeta.innerHTML =
+    "captured " + fmtWhen(atom.t) + "<br>" + fmtCoord(atom) + "<br>" +
+    (atom.frames?.length || 0) + " frames · sound is the clip's own audio";
+  setFrame(0);
+
+  function setFrame(i) {
+    playIdx = i;
+    if (urls[i]) els.playFrame.src = urls[i];
+    els.playBadge.textContent = String(i + 1).padStart(2, "0") + " / " + String(urls.length).padStart(2, "0") + "s";
+    [...els.playStrip.children].forEach((el, j) => el.classList.toggle("on", j === i));
+  }
+
+  // The audio is the clock. Frames are looked up from audio.currentTime on
+  // every animation frame, so the sound plays start-to-finish uninterrupted
+  // and the pictures follow it. No second timer, no drift, no chopping.
+  els.btnPlay.onclick = async () => {
+    stopPlayback();
+    const a = els.playAudio;
+
+    // wait until there's enough buffered to play through without stalling
+    if (a.readyState < 3) {
+      els.btnPlay.textContent = "BUFFERING…";
+      await new Promise((res) => {
+        const ok = () => { a.removeEventListener("canplaythrough", ok); res(); };
+        a.addEventListener("canplaythrough", ok);
+        setTimeout(res, 3000); // don't hang forever on odd codecs
+      });
+    }
+
+    els.btnPlay.textContent = "PLAYING…";
+    try { a.currentTime = 0; } catch (e) {}
+    setFrame(0);
+    try { await a.play(); } catch (e) {}
+
+    // real clip length if the browser knows it, else the nominal capture length
+    const span = (isFinite(a.duration) && a.duration > 0) ? a.duration : atom.seconds;
+
+    const follow = () => {
+      if (a.paused || a.ended) { finish(); return; }
+      const i = Math.min(Math.floor((a.currentTime / span) * urls.length), urls.length - 1);
+      if (i !== playIdx) setFrame(i);
+      playRAF = requestAnimationFrame(follow);
+    };
+    playRAF = requestAnimationFrame(follow);
+
+    a.onended = finish;
+    function finish() {
+      if (playRAF) cancelAnimationFrame(playRAF);
+      playRAF = null;
+      setFrame(urls.length - 1);
+      els.btnPlay.textContent = "REPLAY MOMENT";
+    }
+  };
+}
+
+function stopPlayback() {
+  if (playRAF) cancelAnimationFrame(playRAF);
+  playRAF = null;
+  els.playAudio.pause();
+}
+
+// ── views ────────────────────────────────────────────────────
+function showView(name) {
+  stopPlayback();
+  els.viewCapture.classList.toggle("hide", name !== "capture");
+  els.viewPlayer.classList.toggle("hide", name !== "player");
+  els.viewLibrary.classList.toggle("hide", name !== "library");
+  els.tabCapture.classList.toggle("on", name === "capture");
+  els.tabReplay.classList.toggle("on", name !== "capture");
+  if (name === "capture") {
+    els.heading.textContent = "Capture where you are.";
+    els.subtext.textContent = "Ten seconds of picture and sound, pinned to this time and place. All of it stays on this device.";
+  } else {
+    els.heading.textContent = "Your moments.";
+    els.subtext.textContent = "Each one replays as a living photo with the sound of the place underneath.";
+    if (name === "library") renderLibrary();
+  }
+}
+
+// ── wire up ──────────────────────────────────────────────────
+els.tabCapture.onclick = () => showView("capture");
+els.tabReplay.onclick = () => showView("library");
+els.btnBack.onclick = () => showView("library");
+els.btnRecord.onclick = record;
+
+startGPS();
+startCamera();
+</script>
+</body>
+</html>
