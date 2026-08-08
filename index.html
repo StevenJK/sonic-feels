@@ -208,6 +208,10 @@
         IMPORT<input type="file" id="fileImport" accept="application/json" style="display:none">
       </label>
     </div>
+    <button class="ghost" id="btnNudge" style="width:100%">NUDGE ME AT RANDOM · OFF</button>
+    <div style="height:8px"></div>
+    <button class="ghost hide" id="btnNudgeTest" style="width:100%">SEND A TEST NUDGE</button>
+    <div class="meta" id="nudgeMeta" style="margin-top:8px"></div>
     <div class="empty hide" id="emptyState">No moments yet.<br>Capture your first one — ten seconds, wherever you're standing.</div>
   </section>
 
@@ -246,12 +250,35 @@ const db = {
   open() {
     if (this._p) return this._p;
     this._p = new Promise((res, rej) => {
-      const r = indexedDB.open("sonic-moments", 1);
-      r.onupgradeneeded = () => r.result.createObjectStore("atoms", { keyPath: "id" });
+      const r = indexedDB.open("sonic-moments", 2);
+      // Guarded on purpose: v1 installs already hold every moment ever
+      // captured in `atoms`, and creating a store that exists throws —
+      // which would take the whole database down with it.
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains("atoms")) d.createObjectStore("atoms", { keyPath: "id" });
+        if (!d.objectStoreNames.contains("prefs")) d.createObjectStore("prefs", { keyPath: "k" });
+      };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
     return this._p;
+  },
+  async getPref(k) {
+    const d = await this.open();
+    return new Promise((res) => {
+      const rq = d.transaction("prefs").objectStore("prefs").get(k);
+      rq.onsuccess = () => res(rq.result || null);
+      rq.onerror = () => res(null);
+    });
+  },
+  async setPref(v) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const tx = d.transaction("prefs", "readwrite");
+      tx.objectStore("prefs").put(v);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
   },
   async put(atom) {
     const d = await this.open();
@@ -295,6 +322,7 @@ const els = {
   tabJourney: $("tabJourney"), viewJourney: $("viewJourney"), tripBar: $("tripBar"),
   jFrame: $("jFrame"), jBadge: $("jBadge"), jMap: $("jMap"), jScrub: $("jScrub"),
   jMeta: $("jMeta"), btnJourney: $("btnJourney"), jEmpty: $("jEmpty"),
+  btnNudge: $("btnNudge"), btnNudgeTest: $("btnNudgeTest"), nudgeMeta: $("nudgeMeta"),
 };
 
 // ── state ────────────────────────────────────────────────────
@@ -537,6 +565,7 @@ async function renderLibrary() {
   els.atomList.innerHTML = "";
   els.emptyState.classList.toggle("hide", atoms.length > 0);
   drawMap(atoms);
+  renderNudge();
 
   for (const a of atoms) {
     const row = document.createElement("div");
@@ -1158,6 +1187,115 @@ els.btnJourney.onclick = () => {
   soundAt(from);
 };
 
+// ── random nudges ────────────────────────────────────────────
+// Android gives a web app no alarm clock. The only way to be woken while
+// closed, without a server sitting somewhere knowing your schedule, is
+// Periodic Background Sync: Chrome wakes the installed app when it feels
+// like it — no more often than every few hours — and the service worker
+// then rolls the dice on whether to say anything. So the app can't pick
+// the moment. It can only decide what to do with the moments it's given,
+// which is what makes the nudges land irregularly instead of on the hour.
+// Ask to be woken often, then throw most of the wake-ups away. Chrome
+// floors the interval at several hours regardless of what's asked for,
+// and discarding wakes at random is the only lever there is on *when* a
+// nudge arrives. Both constants are mirrored in sw.js.
+const NUDGE_WAKE = 6 * 60 * 60 * 1000;       // requested wake interval
+const NUDGE_MIN_GAP = 18 * 60 * 60 * 1000;   // never two nudges closer than this
+const NUDGE_DEFAULTS = { k: "nudge", on: false, from: 9, to: 21, last: 0 };
+
+async function nudgePrefs() {
+  return (await db.getPref("nudge")) || { ...NUDGE_DEFAULTS };
+}
+
+async function syncSupport() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return "unsupported";
+  const reg = await navigator.serviceWorker.ready.catch(() => null);
+  if (!reg || !("periodicSync" in reg)) return "unsupported";
+  try {
+    const st = await navigator.permissions.query({ name: "periodic-background-sync" });
+    return st.state === "granted" ? "ready" : "blocked";
+  } catch (e) {
+    return "unsupported";
+  }
+}
+
+async function renderNudge() {
+  const p = await nudgePrefs();
+  els.btnNudge.textContent = "NUDGE ME AT RANDOM · " + (p.on ? "ON" : "OFF");
+  els.btnNudge.style.borderColor = p.on ? "var(--accent)" : "var(--line)";
+  els.btnNudge.style.color = p.on ? "var(--accent)" : "var(--paper)";
+  els.btnNudgeTest.classList.toggle("hide", !p.on);
+
+  if (!p.on) {
+    els.nudgeMeta.textContent =
+      "Off. Turn this on and the app will occasionally ask you to capture the sound of wherever you are.";
+    return;
+  }
+  const support = await syncSupport();
+  const when = "between " + p.from + ":00 and " + p.to + ":00, never twice in " +
+    Math.round(NUDGE_MIN_GAP / 3600000) + "h";
+  const seen = p.last ? "last nudge " + fmtWhen(p.last) : "no nudge sent yet";
+  els.nudgeMeta.textContent =
+    support === "ready"
+      ? "On · " + when + ".\nChrome decides the exact moment it wakes the app, so expect roughly one a day rather than anything punctual. " + seen + "."
+      : support === "blocked"
+        ? "On, but Android hasn't granted background wake-ups yet. That usually comes with using the installed app for a while. " + seen + "."
+        : "On, but this browser can't wake a closed web app at all — nudges will only appear if it happens to be running. Installing to the home screen is what makes this work.";
+  els.nudgeMeta.style.whiteSpace = "pre-line";
+}
+
+els.btnNudge.onclick = async () => {
+  const p = await nudgePrefs();
+  const reg = await navigator.serviceWorker.ready.catch(() => null);
+
+  if (p.on) {
+    p.on = false;
+    await db.setPref(p);
+    if (reg && reg.periodicSync) { try { await reg.periodicSync.unregister("nudge"); } catch (e) {} }
+    renderNudge();
+    return;
+  }
+
+  if (!("Notification" in window)) {
+    els.nudgeMeta.textContent = "This browser has no notifications at all.";
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") {
+    els.nudgeMeta.textContent =
+      "Notifications are blocked for this app. Android's app settings is the only place to undo that.";
+    return;
+  }
+  // Ask for the wake-ups. Chrome may refuse, and there's nothing to be
+  // done about it here — renderNudge() says so plainly rather than
+  // leaving the toggle looking like it worked.
+  if (reg && reg.periodicSync) {
+    try { await reg.periodicSync.register("nudge", { minInterval: NUDGE_WAKE }); } catch (e) {}
+  }
+  p.on = true;
+  await db.setPref(p);
+  renderNudge();
+};
+
+els.btnNudgeTest.onclick = async () => {
+  const reg = await navigator.serviceWorker.ready.catch(() => null);
+  if (!reg) return;
+  await reg.showNotification("Sonic Moments", {
+    body: "This is what a nudge looks like. Tap it.",
+    icon: "icons/icon-192.png", badge: "icons/icon-192.png",
+    tag: "nudge", data: { url: "./?nudge=1" },
+  });
+};
+
+// Tapping a nudge lands here: either a fresh load with ?nudge=1, or a
+// message from the worker when a window was already open.
+function goCapture() { showView("capture"); }
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "nudge") goCapture();
+  });
+}
+
 // ── views ────────────────────────────────────────────────────
 function showView(name) {
   stopPlayback();
@@ -1214,6 +1352,13 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   });
+}
+
+// Opened from a nudge: land on the capture screen (already the default)
+// and drop the marker, so a reload later isn't still "a nudge".
+if (new URLSearchParams(location.search).has("nudge")) {
+  goCapture();
+  history.replaceState(null, "", location.pathname);
 }
 
 startGPS();

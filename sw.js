@@ -11,7 +11,7 @@
 // Bump this after changing index.html. Not strictly required — the app
 // shell refreshes itself on the next open either way — but bumping it
 // throws the old copy away cleanly.
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "sonic-moments-" + VERSION;
 
 const SHELL = [
@@ -69,4 +69,90 @@ self.addEventListener("fetch", (e) => {
       return hit || (await fresh) || Response.error();
     })
   );
+});
+
+// ── random nudges ────────────────────────────────────────────
+// Chrome wakes this worker every so often — its call entirely, no more
+// than every few hours, and only while the app is installed. Each wake
+// is a chance to nudge, not an instruction to: most are thrown away, so
+// the nudges land at unpredictable times instead of on a timetable.
+// Mirrors the constants in index.html.
+const NUDGE_MIN_GAP = 18 * 60 * 60 * 1000;
+const NUDGE_SKIP = 0.55;                     // odds a given wake stays quiet
+
+const NUDGES = [
+  "What does it sound like where you are?",
+  "Ten seconds of right here.",
+  "Is there a sound here worth keeping?",
+  "You'd photograph this. Listen to it instead.",
+  "Wherever you're standing — how does it sound?",
+];
+
+// The page owns this database; the worker only reads its own settings
+// row and writes the timestamp back. Opened without a version so it can
+// never trigger an upgrade of its own.
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("sonic-moments");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function getNudgePrefs() {
+  const d = await openDB();
+  if (!d.objectStoreNames.contains("prefs")) return null;
+  return new Promise((res) => {
+    const rq = d.transaction("prefs").objectStore("prefs").get("nudge");
+    rq.onsuccess = () => res(rq.result || null);
+    rq.onerror = () => res(null);
+  });
+}
+async function setNudgePrefs(v) {
+  const d = await openDB();
+  if (!d.objectStoreNames.contains("prefs")) return;
+  return new Promise((res) => {
+    const tx = d.transaction("prefs", "readwrite");
+    tx.objectStore("prefs").put(v);
+    tx.oncomplete = res; tx.onerror = res;
+  });
+}
+
+async function maybeNudge() {
+  const p = await getNudgePrefs().catch(() => null);
+  if (!p || !p.on) return;
+
+  const h = new Date().getHours();
+  const awake = p.from <= p.to ? (h >= p.from && h < p.to) : (h >= p.from || h < p.to);
+  if (!awake) return;                                    // don't wake anyone at 4am
+  if (Date.now() - (p.last || 0) < NUDGE_MIN_GAP) return;
+  if (Math.random() < NUDGE_SKIP) return;
+
+  await setNudgePrefs({ ...p, last: Date.now() });
+  await self.registration.showNotification("Sonic Moments", {
+    body: NUDGES[Math.floor(Math.random() * NUDGES.length)],
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    tag: "nudge",
+    data: { url: "./?nudge=1" },
+  });
+}
+
+self.addEventListener("periodicsync", (e) => {
+  if (e.tag === "nudge") e.waitUntil(maybeNudge());
+});
+
+// Tapping the nudge should land on the capture screen — reusing the
+// window if one is already open rather than stacking up another.
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of open) {
+      if (c.url.startsWith(self.registration.scope)) {
+        c.postMessage({ type: "nudge" });
+        return c.focus();
+      }
+    }
+    return self.clients.openWindow(new URL("./?nudge=1", self.location.href).href);
+  })());
 });

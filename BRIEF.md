@@ -24,8 +24,9 @@ No accounts, no backend, no analytics. Do not add any.
   - `FRAMES + SOUND` — camera stays live, grabs one frame/sec for 10s + audio.
   - `PHOTO + CLEAN SOUND` — **this is the real product.** Takes one still, stops the
     camera hardware entirely, then records 10s of audio.
-- **Storage** — IndexedDB store `atoms` in db `sonic-moments`. Atom shape:
+- **Storage** — IndexedDB db `sonic-moments` (v2), store `atoms`. Atom shape:
   `{ id, t, lat, lng, acc, frames: [Blob], audio: Blob, seconds, mode }`
+  A second store `prefs` holds settings the service worker needs to read, keyed by `k`.
 - **Replay** — audio decoded whole into an AudioBuffer, played via
   AudioBufferSourceNode through gain + limiter. Frames follow `AudioContext.currentTime`.
 - **Backup** — export/import all moments as one JSON file (blobs base64'd).
@@ -37,6 +38,8 @@ No accounts, no backend, no analytics. Do not add any.
 - **Trip timeline** (`JOURNEY` tab) — moments auto-group into trips by time (a gap
   over 8h starts a new one). Drag the scrubber and the photo, the trace and the sound
   move together; `PLAY JOURNEY` walks the whole trip on its own, clip after clip.
+- **Random nudges** — toggle at the bottom of `MOMENTS`. Read the constraint below
+  before touching this: it is the one feature the platform genuinely limits.
 
 ## Hard-won constraints — DO NOT REGRESS THESE
 These cost many rounds of debugging. Every one is load-bearing.
@@ -81,7 +84,23 @@ These cost many rounds of debugging. Every one is load-bearing.
    that would quietly undo the premise. `fitTrace()` is deliberately shaped so a raster
    layer could be drawn behind it later if that trade is ever worth making.
 
-10. **The service worker only ever touches our own files.** It ignores anything that
+10. **Nudges cannot be scheduled, only hoped for.** Android gives a web app no alarm
+    clock. Web Push would be precise but needs a server that knows your schedule, which
+    the app refuses to have; Notification Triggers is the right API but never shipped
+    to stable Chrome. What's left is **Periodic Background Sync**: Chrome wakes the
+    installed app when it feels like it, at most every few hours, and `maybeNudge()` in
+    `sw.js` decides whether to say anything — checking waking hours, an 18h minimum gap,
+    then throwing away 55% of wakes at random so nudges don't arrive like clockwork.
+    The app cannot pick the moment, only what to do with the moments it's handed. If
+    nudges ever stop, that's Chrome deciding the app isn't used enough to be worth
+    waking, and there is no code fix for it.
+
+11. **The `prefs` store made the database v2 — the upgrade is guarded.** `onupgradeneeded`
+    checks `objectStoreNames.contains()` before creating anything, because on an existing
+    phone `atoms` already holds every moment ever captured and creating a store twice
+    throws, taking the whole database with it. Never make that handler unconditional.
+
+12. **The service worker only ever touches our own files.** It ignores anything that
    isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
    and `data:` URLs the camera, the player and the backup importer pass around. It is
    still true that the app makes zero calls to anything but itself.
@@ -97,12 +116,7 @@ background, so a change to `index.html` shows up the **second** time the app is 
 after a deploy. Bumping `VERSION` in `sw.js` throws the old copy away cleanly.
 
 ## What I want next (roughly in order)
-1. **Random nudge notifications** — prompt me at random times to capture a moment,
-   since I have the habit of taking photos but not of capturing sound. Needs a small
-   push scheduler; background *capture* is impossible on Android and is not the goal —
-   the nudge just opens the app to the capture screen. (The service worker is now in
-   place, which is what would show the notification.)
-2. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
+1. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
    any music in a clip. Deliberately optional — the raw sound is the artifact, and a
    busker or a street will never be recognisable.
 
