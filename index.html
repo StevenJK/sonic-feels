@@ -40,11 +40,11 @@
   h1 { font-size: 28px; font-weight: 400; line-height: 1.1; }
   .sub { font-size: 14px; opacity: .55; line-height: 1.5; }
 
-  nav { display: flex; gap: 8px; }
+  nav { display: flex; gap: 6px; }
   nav button {
     flex: 1; background: transparent; color: var(--paper); border: 1px solid var(--line);
-    border-radius: 20px; padding: 9px 0; font-family: var(--mono); font-size: 12px;
-    letter-spacing: .08em; cursor: pointer;
+    border-radius: 20px; padding: 9px 0; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .06em; cursor: pointer;
   }
   nav button.on { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 700; }
 
@@ -113,6 +113,32 @@
   }
   .modes button.on { border-color: var(--accent); color: var(--accent); }
   .hide { display: none !important; }
+
+  /* ── journey ── */
+  .tripbar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .tripbar button {
+    flex-shrink: 0; background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 16px; padding: 7px 12px; font-family: var(--mono); font-size: 11px;
+    white-space: nowrap; cursor: pointer;
+  }
+  .tripbar button.on { border-color: var(--accent); color: var(--accent); }
+  /* the picture, the trace and the scrubber have to share one screen —
+     you drag with a thumb while looking at the photo, so nothing here
+     can sit below the fold. The vh caps shrink the two panels on short
+     phones; object-fit means the photo just crops. */
+  #viewJourney .stage { aspect-ratio: 4/5; max-height: 36vh; }
+  .mapbox.tall { aspect-ratio: 10/7; max-height: 19vh; }
+  /* the thumb is deliberately oversized — this gets dragged one-handed,
+     walking, usually without looking at it */
+  #jScrub { -webkit-appearance: none; appearance: none; width: 100%; height: 30px; background: transparent; cursor: pointer; }
+  #jScrub::-webkit-slider-runnable-track { height: 3px; background: var(--line); border-radius: 2px; }
+  #jScrub::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10.5px;
+    border-radius: 50%; background: var(--accent); border: none;
+  }
+  #jScrub::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+  #jScrub::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); border: none; }
+  #jScrub:disabled { opacity: .35; }
 </style>
 </head>
 <body>
@@ -126,6 +152,7 @@
   <nav>
     <button id="tabCapture" class="on">CAPTURE</button>
     <button id="tabReplay">MOMENTS</button>
+    <button id="tabJourney">JOURNEY</button>
   </nav>
 
   <!-- ── CAPTURE ─────────────────────────────── -->
@@ -182,6 +209,24 @@
       </label>
     </div>
     <div class="empty hide" id="emptyState">No moments yet.<br>Capture your first one — ten seconds, wherever you're standing.</div>
+  </section>
+
+  <!-- ── JOURNEY: a trip, scrubbable ──────────── -->
+  <section id="viewJourney" class="hide">
+    <div class="tripbar" id="tripBar"></div>
+    <div style="height:10px"></div>
+    <div class="stage">
+      <img id="jFrame" alt="moment from this journey">
+      <div class="badge" id="jBadge"></div>
+    </div>
+    <div style="height:10px"></div>
+    <div class="mapbox tall"><svg id="jMap" viewBox="0 0 100 70" preserveAspectRatio="none" style="width:100%;height:100%"></svg></div>
+    <div style="height:4px"></div>
+    <input type="range" id="jScrub" min="0" max="0" value="0" step="1" aria-label="Scrub through this journey">
+    <div class="meta" id="jMeta"></div>
+    <div style="height:12px"></div>
+    <button class="bigbtn" id="btnJourney">PLAY JOURNEY</button>
+    <div class="empty hide" id="jEmpty">No journeys yet.<br>Capture a few moments and they'll string themselves together here.</div>
   </section>
 </div>
 
@@ -247,6 +292,9 @@ const els = {
   map: $("map"), atomList: $("atomList"), emptyState: $("emptyState"),
   btnShare: $("btnShare"), btnExport: $("btnExport"), fileImport: $("fileImport"),
   heading: $("heading"), subtext: $("subtext"),
+  tabJourney: $("tabJourney"), viewJourney: $("viewJourney"), tripBar: $("tripBar"),
+  jFrame: $("jFrame"), jBadge: $("jBadge"), jMap: $("jMap"), jScrub: $("jScrub"),
+  jMeta: $("jMeta"), btnJourney: $("btnJourney"), jEmpty: $("jEmpty"),
 };
 
 // ── state ────────────────────────────────────────────────────
@@ -510,17 +558,31 @@ async function renderLibrary() {
   }
 }
 
+// Fit a set of moments into a box, as an abstract trace: there are no map
+// tiles anywhere in this app, because fetching them would tell a server
+// where you've been. What you get is the shape of the walk, which for a
+// trip you took yourself is usually enough to recognise it.
+function fitTrace(located, w, h, pad) {
+  const lats = located.map((a) => a.lat), lngs = located.map((a) => a.lng);
+  const mnLa = Math.min(...lats), mxLa = Math.max(...lats);
+  const mnLo = Math.min(...lngs), mxLo = Math.max(...lngs);
+  return {
+    px: (a) => ((a.lng - mnLo) / ((mxLo - mnLo) || 1)) * (w * (1 - 2 * pad)) + w * pad,
+    py: (a) => (1 - (a.lat - mnLa) / ((mxLa - mnLa) || 1)) * (h * (1 - 2 * pad)) + h * pad,
+  };
+}
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
 function drawMap(atoms) {
   const svg = els.map;
   svg.innerHTML = "";
   const located = atoms.filter((a) => a.lat != null);
   if (located.length === 0) return;
-  const lats = located.map((a) => a.lat), lngs = located.map((a) => a.lng);
-  const mnLa = Math.min(...lats), mxLa = Math.max(...lats);
-  const mnLo = Math.min(...lngs), mxLo = Math.max(...lngs);
-  const pad = 0.14;
-  const px = (a) => ((a.lng - mnLo) / ((mxLo - mnLo) || 1)) * (100 * (1 - 2 * pad)) + 100 * pad;
-  const py = (a) => (1 - (a.lat - mnLa) / ((mxLa - mnLa) || 1)) * (56.25 * (1 - 2 * pad)) + 56.25 * pad;
+  const { px, py } = fitTrace(located, 100, 56.25, 0.14);
 
   if (located.length > 1) {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
@@ -843,17 +905,277 @@ async function shareVideo(atom) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+// ── trip timeline ────────────────────────────────────────────
+// Moments group into trips by time alone: a gap longer than TRIP_GAP
+// starts a new one, so a weekend away becomes a single journey with
+// nothing to name or tag.
+//
+// The scrubber steps moment to moment, not by real elapsed time. A trip
+// clusters — fifteen moments in one afternoon, then nothing until the
+// evening — and on a time-proportional bar those clusters are a pixel
+// wide and impossible to hit with a thumb. The real times are in the
+// readout underneath instead.
+const TRIP_GAP = 8 * 60 * 60 * 1000;
+const SCRUB_SETTLE = 140;      // ms the drag must rest before sound starts
+const FADE_IN = 0.08, FADE_OUT = 0.12;
+const BUF_MAX = 6;             // decoded clips kept in memory, ~3.8MB each
+
+let trips = [], trip = [], tripIdx = 0, jIdx = 0, jPlaying = false;
+let jThumbs = [];              // frame-0 URL per moment in the open trip
+let jFrameURLs = [];           // every frame of the moment currently sounding
+let scrubTimer = null, jRAF = null;
+let jSrc = null, jGain = null, jLimiter = null, jToken = 0;
+const bufCache = new Map();    // id → { buffer, boost }, oldest evicted first
+
+function groupTrips(atoms) {
+  const out = [];
+  let cur = [];
+  for (const a of atoms) {
+    if (cur.length && a.t - cur[cur.length - 1].t > TRIP_GAP) { out.push(cur); cur = []; }
+    cur.push(a);
+  }
+  if (cur.length) out.push(cur);
+  return out.reverse();                        // newest journey first
+}
+
+function tripLabel(t) {
+  const a = new Date(t[0].t), b = new Date(t[t.length - 1].t);
+  const d = { day: "numeric", month: "short" };
+  const span = a.toDateString() === b.toDateString()
+    ? a.toLocaleDateString([], d)
+    : a.toLocaleDateString([], d) + "–" + b.toLocaleDateString([], d);
+  const yr = a.getFullYear() !== new Date().getFullYear() ? " " + a.getFullYear() : "";
+  return span + yr + " · " + t.length;
+}
+
+// Decode on demand and keep only a handful — a decoded 10s clip is about
+// 3.8MB, so holding a whole trip in memory would be hundreds of MB.
+async function loadClip(atom) {
+  if (bufCache.has(atom.id)) {
+    const hit = bufCache.get(atom.id);         // re-insert to mark it recent
+    bufCache.delete(atom.id); bufCache.set(atom.id, hit);
+    return hit;
+  }
+  if (!atom.audio) return null;
+  const buffer = await getCtx().decodeAudioData(await atom.audio.arrayBuffer());
+  const entry = { buffer, boost: normaliseGain(buffer) };
+  bufCache.set(atom.id, entry);
+  while (bufCache.size > BUF_MAX) bufCache.delete(bufCache.keys().next().value);
+  return entry;
+}
+
+function jLimit() {
+  if (!jLimiter) {
+    const ctx = getCtx();
+    jLimiter = ctx.createDynamicsCompressor();
+    jLimiter.threshold.value = -3; jLimiter.knee.value = 0; jLimiter.ratio.value = 20;
+    jLimiter.attack.value = 0.002; jLimiter.release.value = 0.1;
+    jLimiter.connect(ctx.destination);
+  }
+  return jLimiter;
+}
+
+// Fade rather than cut: dragging across a trip means clips are being
+// swapped constantly, and a hard stop on ambient sound is a click.
+function fadeOutCurrent(immediate) {
+  if (!jSrc) return;
+  const src = jSrc, gain = jGain;
+  jSrc = null; jGain = null;
+  try {
+    src.onended = null;
+    if (immediate) { src.stop(); return; }
+    const now = getCtx().currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + FADE_OUT);
+    src.stop(now + FADE_OUT + 0.02);
+  } catch (e) {}
+}
+
+function stopJourney(immediate) {
+  jToken++;                                    // invalidates any in-flight decode
+  jPlaying = false;
+  clearTimeout(scrubTimer);
+  if (jRAF) cancelAnimationFrame(jRAF);
+  jRAF = null;
+  fadeOutCurrent(immediate);
+  els.btnJourney.textContent = "PLAY JOURNEY";
+}
+
+// Play the clip at index i. When the journey is running, hand over to the
+// next moment as it ends; when scrubbing, just let it finish.
+async function soundAt(i) {
+  const atom = trip[i];
+  if (!atom) return;
+  const token = ++jToken;
+  const ctx = getCtx();
+  if (ctx.state === "suspended") { try { await ctx.resume(); } catch (e) {} }
+
+  const clip = await loadClip(atom).catch(() => null);
+  if (token !== jToken) return;                // scrubbed elsewhere while decoding
+  fadeOutCurrent();
+  if (!clip) { showFrames(i, 0); return; }
+
+  const src = ctx.createBufferSource();
+  src.buffer = clip.buffer;
+  const gain = ctx.createGain();
+  const now = ctx.currentTime;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(clip.boost, now + FADE_IN);
+  src.connect(gain).connect(jLimit());
+  jSrc = src; jGain = gain;
+
+  src.onended = () => {
+    if (token !== jToken) return;
+    if (jPlaying && i + 1 < trip.length) { setIndex(i + 1); soundAt(i + 1); }
+    else if (jPlaying) stopJourney();
+  };
+  src.start();
+
+  // frames of this moment follow its own clip, same as the single-moment
+  // player: a FRAMES + SOUND capture animates, a photo just holds
+  showFrames(i, clip.buffer.duration);
+}
+
+function showFrames(i, span) {
+  jFrameURLs.forEach(URL.revokeObjectURL);
+  jFrameURLs = [];
+  if (jRAF) cancelAnimationFrame(jRAF);
+  jRAF = null;
+  const frames = trip[i]?.frames || [];
+  if (frames.length < 2 || !span) return;
+
+  jFrameURLs = frames.map((b) => URL.createObjectURL(b));
+  jFrameURLs.forEach((u) => { const pre = new Image(); pre.src = u; });
+  const ctx = getCtx();
+  const t0 = ctx.currentTime;
+  let shown = -1;
+  const follow = () => {
+    const p = (ctx.currentTime - t0) / span;
+    if (p >= 1 || jIdx !== i) { jRAF = null; return; }
+    const f = Math.min(Math.floor(p * jFrameURLs.length), jFrameURLs.length - 1);
+    if (f !== shown) { shown = f; els.jFrame.src = jFrameURLs[f]; }
+    jRAF = requestAnimationFrame(follow);
+  };
+  jRAF = requestAnimationFrame(follow);
+}
+
+function setIndex(i) {
+  jIdx = i;
+  const a = trip[i];
+  if (!a) return;
+  els.jScrub.value = i;
+  if (jThumbs[i]) els.jFrame.src = jThumbs[i];
+  els.jBadge.textContent = String(i + 1).padStart(2, "0") + " / " + String(trip.length).padStart(2, "0");
+  els.jMeta.innerHTML = fmtWhen(a.t) + "<br>" + fmtCoord(a);
+  drawJourneyMap(i);
+}
+
+function drawJourneyMap(active) {
+  const svg = els.jMap;
+  svg.innerHTML = "";
+  const located = trip.filter((a) => a.lat != null);
+  if (located.length === 0) return;
+  const { px, py } = fitTrace(located, 100, 70, 0.14);
+  const pt = (a) => px(a) + "," + py(a);
+
+  // how far along the trip we've scrubbed, in located-moments
+  const walked = located.filter((a) => a.t <= (trip[active]?.t ?? 0));
+
+  if (located.length > 1) {
+    svg.appendChild(svgEl("polyline", {
+      points: located.map(pt).join(" "), fill: "none",
+      stroke: "#4a3f34", "stroke-width": "0.6", "stroke-dasharray": "2 1.5",
+    }));
+  }
+  if (walked.length > 1) {
+    svg.appendChild(svgEl("polyline", {
+      points: walked.map(pt).join(" "), fill: "none",
+      stroke: "#e0895f", "stroke-width": "0.8", "stroke-opacity": ".55",
+    }));
+  }
+  located.forEach((a) => {
+    svg.appendChild(svgEl("circle", {
+      cx: px(a), cy: py(a), r: "1.3", fill: "#e0895f",
+      "fill-opacity": a.t <= (trip[active]?.t ?? 0) ? ".65" : ".22",
+    }));
+  });
+  const here = trip[active];
+  if (here && here.lat != null) {
+    svg.appendChild(svgEl("circle", {
+      cx: px(here), cy: py(here), r: "3.4", fill: "none",
+      stroke: "#e0895f", "stroke-width": "0.5", "stroke-opacity": ".5",
+    }));
+    svg.appendChild(svgEl("circle", { cx: px(here), cy: py(here), r: "2.1", fill: "#e0895f" }));
+  }
+}
+
+function openTrip(n) {
+  stopJourney(true);
+  jThumbs.forEach(URL.revokeObjectURL);
+  tripIdx = n;
+  trip = trips[n] || [];
+  jThumbs = trip.map((a) => (a.frames && a.frames[0]) ? URL.createObjectURL(a.frames[0]) : "");
+  els.jScrub.max = Math.max(trip.length - 1, 0);
+  els.jScrub.disabled = trip.length < 2;
+  els.btnJourney.disabled = trip.length === 0;
+  [...els.tripBar.children].forEach((el, i) => el.classList.toggle("on", i === n));
+  setIndex(0);
+}
+
+async function renderJourney() {
+  const atoms = await db.all();
+  trips = groupTrips(atoms);
+  els.jEmpty.classList.toggle("hide", trips.length > 0);
+  els.tripBar.innerHTML = "";
+  trips.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.textContent = tripLabel(t);
+    b.onclick = () => openTrip(i);
+    els.tripBar.appendChild(b);
+  });
+  openTrip(Math.min(tripIdx, Math.max(trips.length - 1, 0)));
+}
+
+// Dragging moves the picture and the map immediately, but sound waits for
+// the drag to settle — otherwise a fast swipe across a trip fires off a
+// clip per moment and the whole thing machine-guns.
+els.jScrub.oninput = () => {
+  const i = Number(els.jScrub.value);
+  if (i === jIdx) return;
+  setIndex(i);
+  clearTimeout(scrubTimer);
+  scrubTimer = setTimeout(() => soundAt(i), SCRUB_SETTLE);
+};
+
+els.btnJourney.onclick = () => {
+  if (jPlaying) { stopJourney(); return; }
+  if (!trip.length) return;
+  jPlaying = true;
+  els.btnJourney.textContent = "STOP";
+  const from = jIdx >= trip.length - 1 ? 0 : jIdx;   // finished? start over
+  setIndex(from);
+  soundAt(from);
+};
+
 // ── views ────────────────────────────────────────────────────
 function showView(name) {
   stopPlayback();
+  if (name !== "journey") stopJourney(true);
   els.viewCapture.classList.toggle("hide", name !== "capture");
   els.viewPlayer.classList.toggle("hide", name !== "player");
   els.viewLibrary.classList.toggle("hide", name !== "library");
+  els.viewJourney.classList.toggle("hide", name !== "journey");
   els.tabCapture.classList.toggle("on", name === "capture");
-  els.tabReplay.classList.toggle("on", name !== "capture");
+  els.tabReplay.classList.toggle("on", name === "library" || name === "player");
+  els.tabJourney.classList.toggle("on", name === "journey");
   if (name === "capture") {
     els.heading.textContent = "Capture where you are.";
     els.subtext.textContent = "Ten seconds of picture and sound, pinned to this time and place. All of it stays on this device.";
+  } else if (name === "journey") {
+    els.heading.textContent = "Your journeys.";
+    els.subtext.textContent = "Drag through a trip and the picture, the place and the sound move together.";
+    renderJourney();
   } else {
     els.heading.textContent = "Your moments.";
     els.subtext.textContent = "Each one replays as a living photo with the sound of the place underneath.";
@@ -864,6 +1186,7 @@ function showView(name) {
 // ── wire up ──────────────────────────────────────────────────
 els.tabCapture.onclick = () => showView("capture");
 els.tabReplay.onclick = () => showView("library");
+els.tabJourney.onclick = () => showView("journey");
 els.btnBack.onclick = () => showView("library");
 let mode = "frames";
 els.modeFrames.onclick = () => {

@@ -11,7 +11,7 @@
 // Bump this after changing index.html. Not strictly required — the app
 // shell refreshes itself on the next open either way — but bumping it
 // throws the old copy away cleanly.
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = "sonic-moments-" + VERSION;
 
 const SHELL = [

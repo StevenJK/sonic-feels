@@ -34,6 +34,9 @@ No accounts, no backend, no analytics. Do not add any.
 - **Installable PWA** — manifest (standalone, portrait, warm palette, dot-and-rings
   icon) plus a service worker that caches the app shell. Add to Home Screen gives a
   real app window, and it opens and captures with no signal at all.
+- **Trip timeline** (`JOURNEY` tab) — moments auto-group into trips by time (a gap
+  over 8h starts a new one). Drag the scrubber and the photo, the trace and the sound
+  move together; `PLAY JOURNEY` walks the whole trip on its own, clip after clip.
 
 ## Hard-won constraints — DO NOT REGRESS THESE
 These cost many rounds of debugging. Every one is load-bearing.
@@ -64,7 +67,21 @@ These cost many rounds of debugging. Every one is load-bearing.
 6. **The share video needs motion.** A fully static canvas can stop emitting frames and
    produce a broken video — the slow Ken Burns zoom keeps `captureStream` alive.
 
-7. **The service worker only ever touches our own files.** It ignores anything that
+7. **The timeline decodes lazily and caps what it holds.** A decoded 10s clip is about
+   3.8MB, so a whole trip in memory is hundreds of MB. `loadClip()` decodes on demand
+   and `bufCache` keeps only the last 6. Don't pre-decode a trip.
+
+8. **Scrubbing waits for the drag to settle.** Sound starts only after the scrubber
+   rests for `SCRUB_SETTLE` (140ms), or a fast swipe fires a clip per moment and the
+   whole thing machine-guns. Clips fade in and out rather than cutting — a hard stop
+   on ambient sound is an audible click.
+
+9. **No map tiles, ever.** The map is an abstract trace of the GPS points, not a real
+   map, because fetching tiles would tell a server where you've been — the one feature
+   that would quietly undo the premise. `fitTrace()` is deliberately shaped so a raster
+   layer could be drawn behind it later if that trade is ever worth making.
+
+10. **The service worker only ever touches our own files.** It ignores anything that
    isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
    and `data:` URLs the camera, the player and the backup importer pass around. It is
    still true that the app makes zero calls to anything but itself.
@@ -80,15 +97,12 @@ background, so a change to `index.html` shows up the **second** time the app is 
 after a deploy. Bumping `VERSION` in `sw.js` throws the old copy away cleanly.
 
 ## What I want next (roughly in order)
-1. **Trip timeline** — string moments into a scrubbable journey on a map: drag through
-   time and the photo, the place and the sound change together. This was the original
-   vision and isn't built yet.
-2. **Random nudge notifications** — prompt me at random times to capture a moment,
+1. **Random nudge notifications** — prompt me at random times to capture a moment,
    since I have the habit of taking photos but not of capturing sound. Needs a small
    push scheduler; background *capture* is impossible on Android and is not the goal —
    the nudge just opens the app to the capture screen. (The service worker is now in
    place, which is what would show the notification.)
-3. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
+2. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
    any music in a clip. Deliberately optional — the raw sound is the artifact, and a
    busker or a street will never be recognisable.
 
