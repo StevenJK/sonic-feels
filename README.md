@@ -37,6 +37,9 @@ whole lot to a single file worth keeping somewhere.
 - `FRAMES + SOUND` — keeps the camera live and grabs a frame a second alongside the
   audio, so playback flickers gently through the ten seconds.
 
+Ten seconds is the default, with 20 and 30 available for when you know there's music
+worth catching and want more of it. The choice is remembered.
+
 **Moments** — everything captured, newest at the bottom, over a trace of where they
 were. Tap one to replay it, or render it as a video for sharing — a slow Ken Burns
 drift over the still with the sound underneath, sized for Instagram.

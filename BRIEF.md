@@ -35,6 +35,9 @@ No accounts, no backend, no analytics. Do not add any.
 - **Identify music** — `LOOP FOR SHAZAM` plays the clip out loud on repeat so Shazam
   can hear it through the mic while you switch apps. MediaSession is what keeps it
   playing once the app is backgrounded. Nothing is uploaded; no key, no account.
+- **Capture length** — 10 / 20 / 30s on the capture screen, remembered in `prefs`.
+  Ten is the everyday default; the longer ones are for when there's music worth
+  catching, since Shazam gains from *different* passages, not repeated ones.
 - **Installable PWA** — manifest (standalone, portrait, warm palette, dot-and-rings
   icon) plus a service worker that caches the app shell. Add to Home Screen gives a
   real app window, and it opens and captures with no signal at all.
@@ -103,7 +106,13 @@ These cost many rounds of debugging. Every one is load-bearing.
     phone `atoms` already holds every moment ever captured and creating a store twice
     throws, taking the whole database with it. Never make that handler unconditional.
 
-12. **The service worker only ever touches our own files.** It ignores anything that
+12. **The Shazam loop's audio chain is deliberately not the replay chain.** Replay
+    normalises to `PEAK_TARGET` (0.89) and limits at ratio 20, which on a quiet ambient
+    recording pumps and flattens — and those flattened peaks are exactly what a
+    fingerprinter keys on. The loop aims at `LOOP_TARGET` (0.7) through a soft-knee
+    ratio-4 limiter instead: quieter, much less mangled. Don't tidy these into one.
+
+13. **The service worker only ever touches our own files.** It ignores anything that
    isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
    and `data:` URLs the camera, the player and the backup importer pass around. It is
    still true that the app makes zero calls to anything but itself.

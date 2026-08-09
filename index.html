@@ -168,6 +168,12 @@
       <button id="modeFrames" class="on">FRAMES + SOUND</button>
       <button id="modePhoto">PHOTO + CLEAN SOUND</button>
     </div>
+    <div style="height:6px"></div>
+    <div class="modes">
+      <button id="len10" class="on">10 SEC</button>
+      <button id="len20">20 SEC</button>
+      <button id="len30">30 SEC</button>
+    </div>
     <div style="height:10px"></div>
     <button class="bigbtn" id="btnRecord" disabled>STARTING CAMERA…</button>
     <div style="height:10px"></div>
@@ -244,7 +250,12 @@
 // stored in IndexedDB. No network calls anywhere in this file.
 // ═══════════════════════════════════════════════════════════════
 
-const CLIP_SECONDS = 10;
+// How long a capture runs. Ten is the everyday default; the longer
+// options exist for when you already know there's music worth catching
+// and want Shazam to have several distinct passages rather than one.
+// Each moment records its own `seconds`, so mixing lengths is fine.
+const CLIP_CHOICES = [10, 20, 30];
+let clipSeconds = 10;
 
 // ── tiny IndexedDB layer ─────────────────────────────────────
 const db = {
@@ -391,7 +402,7 @@ async function startCamera() {
       els.capMeta.style.whiteSpace = "pre-line";
     }
     els.btnRecord.disabled = false;
-    els.btnRecord.textContent = "CAPTURE " + CLIP_SECONDS + "s";
+    els.btnRecord.textContent = recordLabel();
   } catch (e) {
     els.btnRecord.textContent = "CAMERA BLOCKED";
     els.capWarn.classList.remove("hide");
@@ -451,7 +462,7 @@ function record() {
   const frameTimer = setInterval(grab, 1000);
 
   const tick = setInterval(() => {
-    const left = CLIP_SECONDS - Math.floor((Date.now() - t0) / 1000);
+    const left = clipSeconds - Math.floor((Date.now() - t0) / 1000);
     els.btnRecord.textContent = "RECORDING… " + Math.max(left, 0) + "s";
     if (left <= 0) {
       clearInterval(tick);
@@ -503,7 +514,7 @@ async function recordPhotoMode() {
   els.recLight.classList.add("on");
   els.btnRecord.disabled = true;
   const tick = setInterval(() => {
-    const left = CLIP_SECONDS - Math.floor((Date.now() - t0) / 1000);
+    const left = clipSeconds - Math.floor((Date.now() - t0) / 1000);
     els.btnRecord.textContent = "LISTENING… " + Math.max(left, 0) + "s";
     if (left <= 0) { clearInterval(tick); try { recorder.stop(); } catch (e) {} }
   }, 250);
@@ -523,7 +534,7 @@ async function onRecordedPhoto() {
     lat: fix.lat, lng: fix.lng, acc: fix.acc,
     frames: frameGrabs.slice(0, 1),
     audio: audioBlob,
-    seconds: CLIP_SECONDS,
+    seconds: clipSeconds,
     mode: "photo",
   });
   frameGrabs = [];
@@ -550,14 +561,14 @@ async function onRecorded() {
     id: "a" + when,
     t: when,
     lat: fix.lat, lng: fix.lng, acc: fix.acc,
-    frames: frameGrabs.slice(0, CLIP_SECONDS),
+    frames: frameGrabs.slice(0, clipSeconds),
     audio: audioBlob,
-    seconds: CLIP_SECONDS,
+    seconds: clipSeconds,
   };
   await db.put(atom);
   frameGrabs = [];
   els.btnRecord.disabled = false;
-  els.btnRecord.textContent = "CAPTURE " + CLIP_SECONDS + "s";
+  els.btnRecord.textContent = recordLabel();
   showView("library");
 }
 
@@ -644,6 +655,8 @@ let gainNode = null;
 let shareRAF = null;
 let boost = 1;
 
+const PEAK_TARGET = 0.89;      // where ordinary replay normalises to
+
 // Peak-normalise: find the loudest sample and scale so it just approaches
 // full scale. Ambient recordings sit very low, so this is usually a big lift.
 function normaliseGain(buf) {
@@ -657,7 +670,7 @@ function normaliseGain(buf) {
     }
   }
   if (peak < 0.0001) return 1;          // effectively silence, leave it alone
-  const g = 0.89 / peak;                // leave a little headroom
+  const g = PEAK_TARGET / peak;         // leave a little headroom
   return Math.min(Math.max(g, 1), 40);  // never attenuate, cap the lift
 }
 
@@ -792,7 +805,13 @@ function stopPlayback() {
 // MediaSession is what makes this survive being backgrounded: it tells
 // Android this is real media playback rather than a page making noise,
 // so the audio keeps going once you've switched to Shazam.
+// Recognition wants a different chain from listening. Ordinary replay
+// normalises hard and limits at ratio 20, which on a quiet ambient
+// recording pumps and flattens — and the peaks it flattens are exactly
+// what a fingerprinter keys on. So the loop aims lower and limits gently:
+// quieter than replay, but far less mangled.
 const LOOP_MAX = 4 * 60 * 1000;      // give up eventually rather than loop forever
+const LOOP_TARGET = 0.7;             // peak to aim for, below replay's 0.89
 let loopSrc = null, loopGain = null, loopTimer = null;
 
 function stopLoop() {
@@ -822,16 +841,16 @@ els.btnShazam.onclick = async () => {
   const ctx = getCtx();
   if (ctx.state === "suspended") { try { await ctx.resume(); } catch (e) {} }
 
-  // same chain as ordinary replay: restored level, limiter to catch the
-  // transients that the boost pushes too far
   const src = ctx.createBufferSource();
   src.buffer = decoded;
   src.loop = true;
   const gain = ctx.createGain();
-  gain.gain.value = boost;
+  gain.gain.value = boost * (LOOP_TARGET / PEAK_TARGET);
+  // soft knee, gentle ratio, slow release — catches an overshoot without
+  // riding the whole clip the way the replay limiter does
   const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20;
-  limiter.attack.value = 0.002; limiter.release.value = 0.1;
+  limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 4;
+  limiter.attack.value = 0.005; limiter.release.value = 0.25;
   src.connect(gain).connect(limiter).connect(ctx.destination);
   src.start();
   loopSrc = src; loopGain = gain;
@@ -1406,14 +1425,41 @@ let mode = "frames";
 els.modeFrames.onclick = () => {
   mode = "frames";
   els.modeFrames.classList.add("on"); els.modePhoto.classList.remove("on");
-  els.btnRecord.textContent = "CAPTURE " + CLIP_SECONDS + "s";
+  refreshRecordLabel();
 };
 els.modePhoto.onclick = () => {
   mode = "photo";
   els.modePhoto.classList.add("on"); els.modeFrames.classList.remove("on");
-  els.btnRecord.textContent = "PHOTO + " + CLIP_SECONDS + "s SOUND";
+  refreshRecordLabel();
 };
 els.btnRecord.onclick = () => (mode === "photo" ? recordPhotoMode() : record());
+
+// The record button says both things at once — which mode, and how long —
+// because they're the two decisions made right before pressing it.
+function recordLabel() {
+  return mode === "photo"
+    ? "PHOTO + " + clipSeconds + "s SOUND"
+    : "CAPTURE " + clipSeconds + "s";
+}
+// Only when the button is idle — mid-recording it's a countdown, and it
+// can also be saying CAMERA BLOCKED or SAVING…, none of which should be
+// overwritten by fiddling with the mode or the length.
+function refreshRecordLabel() {
+  if (!els.btnRecord.disabled) els.btnRecord.textContent = recordLabel();
+}
+
+const lenBtns = [$("len10"), $("len20"), $("len30")];
+function setClip(secs, remember) {
+  clipSeconds = secs;
+  lenBtns.forEach((b, i) => b.classList.toggle("on", CLIP_CHOICES[i] === secs));
+  refreshRecordLabel();
+  if (remember) db.setPref({ k: "clip", seconds: secs }).catch(() => {});
+}
+lenBtns.forEach((b, i) => { b.onclick = () => setClip(CLIP_CHOICES[i], true); });
+db.getPref("clip").then((p) => {
+  if (p && CLIP_CHOICES.includes(p.seconds)) setClip(p.seconds, false);
+}).catch(() => {});
+
 els.btnExport.onclick = exportBackup;
 els.fileImport.onchange = (e) => importBackup(e.target.files[0]);
 els.btnShare.onclick = () => { if (current) shareVideo(current); };
