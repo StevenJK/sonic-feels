@@ -32,6 +32,9 @@ No accounts, no backend, no analytics. Do not add any.
 - **Backup** — export/import all moments as one JSON file (blobs base64'd).
 - **Share** — renders a real video (canvas + muxed audio via MediaRecorder,
   1080x1350, slow Ken Burns) for Instagram. Prefers mp4, falls back to webm.
+- **Identify music** — `LOOP FOR SHAZAM` plays the clip out loud on repeat so Shazam
+  can hear it through the mic while you switch apps. MediaSession is what keeps it
+  playing once the app is backgrounded. Nothing is uploaded; no key, no account.
 - **Installable PWA** — manifest (standalone, portrait, warm palette, dot-and-rings
   icon) plus a service worker that caches the app shell. Add to Home Screen gives a
   real app window, and it opens and captures with no signal at all.
@@ -115,10 +118,17 @@ Updating: the service worker serves the cached copy first and refreshes it in th
 background, so a change to `index.html` shows up the **second** time the app is opened
 after a deploy. Bumping `VERSION` in `sw.js` throws the old copy away cleanly.
 
-## What I want next (roughly in order)
-1. Optional later: run the audio through a recognition API (ACRCloud/AudD) to identify
-   any music in a clip. Deliberately optional — the raw sound is the artifact, and a
-   busker or a street will never be recognisable.
+## Decided against — don't rebuild these
+- **A recognition API (ACRCloud/AudD) for identifying music.** Their APIs sign each
+  request with a secret, which can't live in a public single-page app, so it would need
+  a proxy — a backend, plus the recording leaving the phone and reaching a third party.
+  `LOOP FOR SHAZAM` gets the same answer for no key, no server and no upload, and the
+  audio never leaves the device. The only thing lost is the answer being stored on the
+  moment. Not worth the trade.
+- **Map tiles.** See constraint 9.
+
+## What I want next
+Nothing outstanding. The original list is done.
 
 ## Style notes
 - All app logic in one file. No dependencies. No frameworks. No network calls.

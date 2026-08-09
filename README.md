@@ -41,6 +41,11 @@ whole lot to a single file worth keeping somewhere.
 were. Tap one to replay it, or render it as a video for sharing — a slow Ken Burns
 drift over the still with the sound underneath, sized for Instagram.
 
+There's also `LOOP FOR SHAZAM`, for when a moment caught music you want named. Shazam
+can't be handed a file — it listens through the microphone — so this plays the clip out
+loud on repeat, giving you time to switch apps and let it hear a few passes. No upload,
+no account, no key: the recording stays on the phone and Shazam just hears the speaker.
+
 **Journey** — the point of the whole thing. Moments group themselves into trips by
 time, and dragging the scrubber moves through one: the photo, the place on the trace
 and the sound all change together. `PLAY JOURNEY` walks a whole trip on its own.

@@ -191,7 +191,9 @@
     <div style="height:10px"></div>
     <div style="display:flex; gap:10px;">
       <button class="ghost" id="btnShare" style="flex:1">SHARE AS VIDEO</button>
+      <button class="ghost" id="btnShazam" style="flex:1">LOOP FOR SHAZAM</button>
     </div>
+    <div class="meta hide" id="shazamHint" style="margin-top:10px"></div>
     <div style="height:10px"></div>
     <div class="meta" id="playMeta"></div>
     <audio id="playAudio" preload="auto"></audio>
@@ -323,6 +325,7 @@ const els = {
   jFrame: $("jFrame"), jBadge: $("jBadge"), jMap: $("jMap"), jScrub: $("jScrub"),
   jMeta: $("jMeta"), btnJourney: $("btnJourney"), jEmpty: $("jEmpty"),
   btnNudge: $("btnNudge"), btnNudgeTest: $("btnNudgeTest"), nudgeMeta: $("nudgeMeta"),
+  btnShazam: $("btnShazam"), shazamHint: $("shazamHint"),
 };
 
 // ── state ────────────────────────────────────────────────────
@@ -771,6 +774,7 @@ function openPlayer(atom) {
 }
 
 function stopPlayback() {
+  stopLoop();                    // leaving a moment, or replaying it, ends the loop
   if (playRAF) cancelAnimationFrame(playRAF);
   playRAF = null;
   if (srcNode) {
@@ -778,6 +782,78 @@ function stopPlayback() {
     srcNode = null;
   }
 }
+
+// ── loop it for Shazam ───────────────────────────────────────
+// Shazam can't be handed a file — it listens through the microphone. So
+// the way to identify music in a clip is to play it out loud on repeat,
+// which leaves time to switch apps and let Shazam hear a few passes.
+// Nothing is uploaded and no key is needed; the recording stays here.
+//
+// MediaSession is what makes this survive being backgrounded: it tells
+// Android this is real media playback rather than a page making noise,
+// so the audio keeps going once you've switched to Shazam.
+const LOOP_MAX = 4 * 60 * 1000;      // give up eventually rather than loop forever
+let loopSrc = null, loopGain = null, loopTimer = null;
+
+function stopLoop() {
+  clearTimeout(loopTimer);
+  loopTimer = null;
+  if (loopSrc) {
+    const src = loopSrc, gain = loopGain;
+    loopSrc = null; loopGain = null;
+    try {
+      const now = getCtx().currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      src.stop(now + 0.15);
+    } catch (e) {}
+  }
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none";
+  els.btnShazam.textContent = "LOOP FOR SHAZAM";
+  els.shazamHint.classList.add("hide");
+}
+
+els.btnShazam.onclick = async () => {
+  if (loopSrc) { stopLoop(); return; }
+  if (!decoded) { alert("Sound is still decoding — try again in a second."); return; }
+  stopPlayback();
+
+  const ctx = getCtx();
+  if (ctx.state === "suspended") { try { await ctx.resume(); } catch (e) {} }
+
+  // same chain as ordinary replay: restored level, limiter to catch the
+  // transients that the boost pushes too far
+  const src = ctx.createBufferSource();
+  src.buffer = decoded;
+  src.loop = true;
+  const gain = ctx.createGain();
+  gain.gain.value = boost;
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20;
+  limiter.attack.value = 0.002; limiter.release.value = 0.1;
+  src.connect(gain).connect(limiter).connect(ctx.destination);
+  src.start();
+  loopSrc = src; loopGain = gain;
+
+  if ("mediaSession" in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: "Sonic Moment", artist: current ? fmtWhen(current.t) : "", album: "Sonic Moments",
+      });
+      navigator.mediaSession.playbackState = "playing";
+      navigator.mediaSession.setActionHandler("pause", stopLoop);
+      navigator.mediaSession.setActionHandler("stop", stopLoop);
+    } catch (e) {}
+  }
+
+  els.btnShazam.textContent = "STOP LOOPING";
+  els.shazamHint.textContent =
+    "Playing on repeat. Turn the volume up, open Shazam and let it listen — it hears the speaker, so a quiet room helps. Stops on its own after " +
+    (LOOP_MAX / 60000) + " minutes.";
+  els.shazamHint.classList.remove("hide");
+  loopTimer = setTimeout(stopLoop, LOOP_MAX);
+};
 
 // ── backup: export / import ──────────────────────────────────
 // Everything lives in IndexedDB on this device only. Clearing site data or
