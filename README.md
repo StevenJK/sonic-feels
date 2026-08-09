@@ -1,6 +1,6 @@
 <img src="icons/icon-192.png" alt="" width="72" align="right">
 
-# Sonic Moments
+# Sonic Moments or Sonic Feels
 
 **A photo you can hear.**
 
