@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Day Count</title>
+<meta name="description" content="Days until, days since. Kept on this device, works with no signal, talks to nothing.">
+<!-- installable PWA: manifest, worker and icons all live beside this file -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Day Count">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --paper: #f2f2f2;
+    --accent: #d62828;
+    --card: #141414;
+    --line: #272727;
+    --dim: #3a3a3a;
+    --mono: 'Roboto Mono', ui-monospace, 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--ink); color: var(--paper);
+    font-family: var(--mono); min-height: 100vh;
+    display: flex; justify-content: center;
+  }
+  /* env() keeps the header off the punch-hole when it's running installed,
+     with no browser chrome to push it down */
+  #app {
+    width: 100%; max-width: 430px; display: flex; flex-direction: column; gap: 16px;
+    padding: calc(18px + env(safe-area-inset-top)) 18px calc(36px + env(safe-area-inset-bottom));
+  }
+
+  header { display: flex; align-items: baseline; gap: 8px; }
+  .wordmark { font-size: 13px; letter-spacing: .28em; text-transform: uppercase; }
+  .wordmark b { color: var(--accent); font-weight: 700; }
+  .today { margin-left: auto; font-size: 11px; letter-spacing: .1em; opacity: .45; }
+
+  nav { display: flex; gap: 6px; }
+  nav button {
+    flex: 1; background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 20px; padding: 9px 0; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .12em; cursor: pointer;
+  }
+  nav button.on { background: var(--paper); color: var(--ink); border-color: var(--paper); font-weight: 700; }
+
+  /* ── the big number ── */
+  .focus {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    padding: 26px 20px 20px; text-align: center; position: relative; overflow: hidden;
+  }
+  .focus.past { border-color: var(--dim); }
+  .focus .label {
+    font-size: 11px; letter-spacing: .26em; text-transform: uppercase; color: var(--accent);
+  }
+  .focus .count {
+    font-size: 84px; line-height: 1; font-weight: 700; letter-spacing: -.04em;
+    margin: 10px 0 2px; font-variant-numeric: tabular-nums;
+  }
+  .focus .count.small { font-size: 54px; }
+  .focus .unit { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; opacity: .5; }
+  .focus .title { font-size: 20px; margin-top: 16px; line-height: 1.25; letter-spacing: -.01em; }
+  .focus .when { font-size: 11.5px; letter-spacing: .06em; opacity: .5; margin-top: 6px; line-height: 1.7; }
+  .focus .clock {
+    font-size: 13px; letter-spacing: .18em; margin-top: 10px; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .focus .note { font-size: 12px; opacity: .45; margin-top: 10px; line-height: 1.6; }
+
+  /* dot-matrix progress: one dot per slice of the wait, filled as it goes.
+     It's the only decoration in here and it earns its place — the number
+     alone doesn't tell you whether 40 days is nearly there or barely started. */
+  .dots { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); display: block; }
+  .dots i.done { background: var(--paper); }
+  .dots i.now { background: var(--accent); transform: scale(1.35); }
+
+  .arrows { display: flex; gap: 6px; margin-top: 16px; }
+  .arrows button {
+    flex: 1; background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 18px; padding: 8px 0; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .1em; cursor: pointer;
+  }
+  .arrows button:disabled { opacity: .25; }
+
+  /* ── lists and forms ── */
+  .row {
+    display: flex; gap: 12px; align-items: center; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; cursor: pointer;
+  }
+  .row.on { border-color: var(--accent); }
+  .row .n {
+    font-size: 22px; font-weight: 700; min-width: 58px; text-align: right;
+    font-variant-numeric: tabular-nums; letter-spacing: -.03em;
+  }
+  .row.since .n { opacity: .45; }
+  .row .body { flex: 1; min-width: 0; }
+  .row .t { font-size: 14px; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .d { font-size: 10.5px; letter-spacing: .08em; opacity: .45; margin-top: 4px; }
+  .row .bell { background: none; border: none; color: var(--paper); opacity: .25; font-size: 14px; padding: 6px 8px; cursor: pointer; }
+  .row .bell.on { opacity: 1; color: var(--accent); }
+  .row .edit {
+    background: none; border: none; color: var(--paper); opacity: .35; padding: 6px 4px 6px 0;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; cursor: pointer;
+  }
+
+  .group { font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase; opacity: .4; margin-top: 8px; }
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+
+  label.f { display: block; font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; opacity: .45; margin-bottom: 6px; }
+  input[type=text], input[type=date], input[type=time], textarea, select {
+    width: 100%; background: var(--card); color: var(--paper); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 14px;
+  }
+  input[type=date], input[type=time] { color-scheme: dark; }
+  textarea { resize: vertical; min-height: 60px; font-size: 13px; }
+  .two { display: flex; gap: 8px; }
+  .two > div { flex: 1; min-width: 0; }
+
+  .chips { display: flex; gap: 6px; }
+  .chips button {
+    flex: 1; background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 18px; padding: 9px 0; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: .08em; cursor: pointer;
+  }
+  .chips button.on { border-color: var(--accent); color: var(--accent); }
+
+  .bigbtn {
+    background: var(--accent); color: #fff; border: none; border-radius: 24px;
+    padding: 14px 0; width: 100%; font-family: var(--mono); font-size: 12px;
+    letter-spacing: .16em; font-weight: 700; cursor: pointer;
+  }
+  .bigbtn:disabled { opacity: .35; }
+  .ghost {
+    background: transparent; color: var(--paper); border: 1px solid var(--line);
+    border-radius: 24px; padding: 12px 16px; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .1em; cursor: pointer; width: 100%;
+  }
+  .ghost.danger { color: var(--accent); border-color: #4a1f1f; }
+
+  .empty {
+    border: 1px dashed var(--line); border-radius: 10px; padding: 34px 20px;
+    text-align: center; font-size: 13px; opacity: .5; line-height: 1.8;
+  }
+  .meta { font-size: 11px; opacity: .45; line-height: 1.8; }
+  .meta b { color: var(--paper); opacity: .8; font-weight: 400; }
+  .warn { font-size: 11.5px; color: #e0a95f; line-height: 1.6; }
+  .hide { display: none !important; }
+  .sep { height: 1px; background: var(--line); margin: 6px 0; }
+
+  .switch { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .switch .track {
+    width: 42px; height: 24px; border-radius: 12px; background: var(--dim);
+    position: relative; flex-shrink: 0; transition: background .15s;
+  }
+  .switch .track::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--paper); transition: transform .15s;
+  }
+  .switch.on .track { background: var(--accent); }
+  .switch.on .track::after { transform: translateX(18px); }
+  .switch .lbl { font-size: 12px; letter-spacing: .06em; }
+
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(24px + env(safe-area-inset-bottom));
+    background: var(--paper); color: var(--ink); border-radius: 20px;
+    padding: 10px 18px; font-size: 11.5px; letter-spacing: .08em;
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 9;
+  }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="wordmark">DAY<b>·</b>COUNT</div>
+    <div class="today" id="todayStamp"></div>
+  </header>
+
+  <nav>
+    <button data-view="count" class="on">COUNT</button>
+    <button data-view="events">EVENTS</button>
+    <button data-view="settings">SETTINGS</button>
+  </nav>
+
+  <!-- ── COUNT ─────────────────────────────────────────────── -->
+  <section id="viewCount">
+    <div id="focusWrap"></div>
+  </section>
+
+  <!-- ── EVENTS ────────────────────────────────────────────── -->
+  <section id="viewEvents" class="hide" style="display:flex;flex-direction:column;gap:16px">
+    <button class="bigbtn" id="btnNew">+ NEW EVENT</button>
+
+    <form id="form" class="hide" style="display:none;flex-direction:column;gap:12px">
+      <div>
+        <label class="f" for="fTitle">What</label>
+        <input type="text" id="fTitle" maxlength="80" placeholder="Trip to Lisbon" required>
+      </div>
+      <div class="two">
+        <div>
+          <label class="f" for="fDate">Date</label>
+          <input type="date" id="fDate" required>
+        </div>
+        <div>
+          <label class="f" for="fTime">Time (optional)</label>
+          <input type="time" id="fTime">
+        </div>
+      </div>
+      <div>
+        <label class="f">Repeats</label>
+        <div class="chips" id="fRepeat">
+          <button type="button" data-v="none" class="on">ONCE</button>
+          <button type="button" data-v="year">EVERY YEAR</button>
+        </div>
+      </div>
+      <div>
+        <label class="f" for="fNote">Note (optional)</label>
+        <textarea id="fNote" maxlength="200" placeholder="Anything you want to see next to the number."></textarea>
+      </div>
+      <button type="submit" class="bigbtn" id="fSave">SAVE</button>
+      <button type="button" class="ghost" id="fCancel">CANCEL</button>
+    </form>
+
+    <div id="list" class="stack"></div>
+  </section>
+
+  <!-- ── SETTINGS ──────────────────────────────────────────── -->
+  <section id="viewSettings" class="hide" style="display:flex;flex-direction:column;gap:18px">
+
+    <div>
+      <div class="group">Milestone alerts</div>
+      <div class="meta" style="margin:8px 0 12px">
+        A notification as an event you've flagged with the bell gets close —
+        100, 50, 30, 14, 7, 3, 2, 1 days out, and on the day itself.
+        Android gives a web app no alarm clock, so these arrive when Chrome
+        next wakes the app, which may be hours late and may not happen at all.
+        Treat them as a nudge, never as the thing you're relying on.
+      </div>
+      <div class="switch" id="alertToggle"><div class="track"></div><div class="lbl">ALLOW ALERTS</div></div>
+      <div class="meta" id="alertState" style="margin-top:10px"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <div class="group">Icon badge</div>
+      <div class="meta" style="margin:8px 0 12px">
+        Puts the day count of the top event on the app icon, where the phone
+        supports it. Nothing OS may or may not draw it.
+      </div>
+      <div class="switch" id="badgeToggle"><div class="track"></div><div class="lbl">SHOW BADGE</div></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <div class="group">Backup</div>
+      <div class="meta" style="margin:8px 0 12px">
+        Everything lives in this browser's storage on this phone and nowhere
+        else. Clearing site data deletes it for good, so keep a file somewhere.
+      </div>
+      <div class="stack">
+        <button class="ghost" id="btnExport">EXPORT BACKUP</button>
+        <button class="ghost" id="btnImport">IMPORT BACKUP</button>
+        <input type="file" id="fileImport" accept="application/json,.json" class="hide">
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <div class="group">About</div>
+      <div class="meta" style="margin-top:8px">
+        <b>This app makes no network requests at all.</b> No account, no server,
+        no analytics, no fonts or scripts fetched from anywhere. The only files
+        it ever asks for are its own, and the worker keeps those on the device
+        so it opens with the radio off. Your events are yours alone — they are
+        never sent anywhere, because there is nowhere for them to be sent.
+      </div>
+      <div class="meta" style="margin-top:12px" id="storeInfo"></div>
+    </div>
+
+  </section>
+
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+// ═══════════════════════════════════════════════════════════════
+// DAY COUNT — days until, days since.
+//
+// One file. No build step, no dependencies, no framework, and — the
+// whole point — no network. Everything below runs on the device and
+// stays on the device.
+//
+// Same shape as its sibling Sonic Moments: HTML, CSS and JS inline,
+// IndexedDB for the data, a service worker purely so it opens offline.
+// ═══════════════════════════════════════════════════════════════
+
+const DAY = 86400000;
+const MILESTONES = [100, 50, 30, 14, 7, 3, 2, 1, 0];   // mirrored in sw.js
+
+// ── storage ──────────────────────────────────────────────────
+// Two stores: the events themselves, and a prefs row the worker also
+// reads when it wakes up to decide whether to say anything.
+let db;
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("day-count", 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains("events")) d.createObjectStore("events", { keyPath: "id" });
+      if (!d.objectStoreNames.contains("prefs")) d.createObjectStore("prefs", { keyPath: "key" });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function tx(store, mode) { return db.transaction(store, mode).objectStore(store); }
+function req(r) { return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+
+const loadEvents = () => req(tx("events").getAll());
+const putEvent   = (e) => req(tx("events", "readwrite").put(e));
+const delEvent   = (id) => req(tx("events", "readwrite").delete(id));
+const loadPrefs  = async () => (await req(tx("prefs").get("settings"))) || { key: "settings", alerts: false, badge: false, focus: null };
+const savePrefs  = (p) => req(tx("prefs", "readwrite").put(p));
+
+let events = [];
+let prefs = null;
+let view = "count";
+let editing = null;
+let formRepeat = "none";
+let focusIdx = 0;
+
+// ── dates ────────────────────────────────────────────────────
+// Everything here works in whole local calendar days, deliberately.
+// Subtracting two timestamps and dividing by 86,400,000 gets the wrong
+// answer twice a year, because the days the clocks change are 23 and 25
+// hours long. Snapping both ends to local midnight first and rounding
+// afterwards gives the number a human would count off a wall calendar.
+const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a, b) => Math.round((midnight(b) - midnight(a)) / DAY);
+
+// "2026-08-10" parsed by the Date constructor is treated as UTC, which
+// lands on the day before for anyone west of Greenwich. Split it instead.
+function parseDate(s) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function parseTime(s) {
+  if (!s) return null;
+  const [h, mi] = s.split(":").map(Number);
+  return { h, mi };
+}
+
+// The instant this event next matters. For a one-off that's simply its
+// date; for a yearly one it's the next time the day comes round, which
+// is today if today is the day.
+function occurrence(ev, now) {
+  const base = parseDate(ev.date);
+  if (ev.repeat !== "year") return base;
+  const today = midnight(now);
+  let cand = shiftYear(base, today.getFullYear());
+  if (cand < today) cand = shiftYear(base, today.getFullYear() + 1);
+  return cand;
+}
+// 29 February exists one year in four. Anyone born on it still has a
+// birthday in the other three, and the convention is the 28th.
+function shiftYear(base, year) {
+  const m = base.getMonth(), d = base.getDate();
+  const c = new Date(year, m, d);
+  // overflowed into the next month, so take the last day of this one
+  if (c.getMonth() !== m) return new Date(year, m + 1, 0);
+  return c;
+}
+
+// Everything the rest of the app wants to know about an event, worked
+// out once: which way round it is, how far, and how to say it.
+function reckon(ev, now = new Date()) {
+  const occ = occurrence(ev, now);
+  const days = daysBetween(now, occ);
+  const t = parseTime(ev.time);
+  const at = t ? new Date(occ.getFullYear(), occ.getMonth(), occ.getDate(), t.h, t.mi) : null;
+  const ordinal = ev.repeat === "year" ? occ.getFullYear() - parseDate(ev.date).getFullYear() : null;
+  return {
+    occ, at, days,
+    dir: days > 0 ? "until" : days < 0 ? "since" : "today",
+    abs: Math.abs(days),
+    ms: at ? at - now : null,
+    ordinal: ordinal && ordinal > 0 ? ordinal : null,
+  };
+}
+
+const WD = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MO = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const fmtDate = (d) => `${WD[d.getDay()]} ${d.getDate()} ${MO[d.getMonth()]} ${d.getFullYear()}`;
+const fmtShort = (d) => `${String(d.getDate()).padStart(2, "0")} ${MO[d.getMonth()].slice(0, 3).toUpperCase()} ${d.getFullYear()}`;
+const fmtTime = (t) => `${String(t.h).padStart(2, "0")}:${String(t.mi).padStart(2, "0")}`;
+
+// 96 days is easier to hold as "13 weeks and 5 days"; 800 is easier as
+// "2 years, 2 months". Below a fortnight neither helps, so say nothing.
+function inWords(n) {
+  if (n < 14) return "";
+  const parts = [];
+  if (n < 120) {
+    const w = Math.floor(n / 7), d = n % 7;
+    parts.push(`${w} week${w === 1 ? "" : "s"}`);
+    if (d) parts.push(`${d} day${d === 1 ? "" : "s"}`);
+  } else {
+    const y = Math.floor(n / 365), rem = n % 365, mo = Math.floor(rem / 30.44);
+    if (y) parts.push(`${y} year${y === 1 ? "" : "s"}`);
+    if (mo) parts.push(`${mo} month${mo === 1 ? "" : "s"}`);
+    if (!y && !mo) parts.push(`${n} days`);
+  }
+  return parts.join(", ");
+}
+
+const suffix = (n) => (n % 100 >= 11 && n % 100 <= 13) ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
+
+// Sort order for the list and for stepping through with the arrows:
+// what's coming, soonest first, then what's gone, most recent first.
+function sorted() {
+  const now = new Date();
+  const up = [], past = [];
+  for (const ev of events) {
+    const r = reckon(ev, now);
+    (r.days >= 0 ? up : past).push([ev, r]);
+  }
+  up.sort((a, b) => a[1].days - b[1].days);
+  past.sort((a, b) => b[1].days - a[1].days);
+  return up.concat(past);
+}
+
+// ── the big number ───────────────────────────────────────────
+function renderFocus() {
+  const wrap = document.getElementById("focusWrap");
+  const all = sorted();
+  if (!all.length) {
+    wrap.innerHTML = `<div class="empty">Nothing counted yet.<br>Add a date and this page fills up.</div>`;
+    return;
+  }
+  focusIdx = Math.max(0, Math.min(focusIdx, all.length - 1));
+  const [ev, r] = all[focusIdx];
+
+  // On the day itself a plain zero is the satisfying thing to see, except
+  // for an anniversary, where the number you actually want is which one.
+  const label = r.dir === "today" ? "TODAY" : r.dir === "until" ? "DAYS UNTIL" : "DAYS SINCE";
+  const big = r.dir === "today" ? (r.ordinal ? String(r.ordinal) : "0") : String(r.abs);
+  const unit = r.dir === "today"
+    ? (r.ordinal ? (r.ordinal === 1 ? "year today" : "years today") : "days to go")
+    : (r.abs === 1 ? "day" : "days");
+  const words = inWords(r.abs);
+
+  const when = [];
+  when.push(fmtDate(r.occ) + (r.at ? ` · ${fmtTime(parseTime(ev.time))}` : ""));
+  if (words) when.push(words);
+  if (r.ordinal && r.dir !== "today") when.push(`${r.ordinal}${suffix(r.ordinal)} time round`);
+
+  wrap.innerHTML = `
+    <div class="focus ${r.dir === "since" ? "past" : ""}">
+      <div class="label">${esc(label)}</div>
+      <div class="count ${big.length > 4 ? "small" : ""}">${esc(big)}</div>
+      <div class="unit">${esc(unit)}</div>
+      <div class="title">${esc(ev.title)}</div>
+      <div class="when">${when.map(esc).join("<br>")}</div>
+      <div class="clock" id="ticker"></div>
+      ${ev.note ? `<div class="note">${esc(ev.note)}</div>` : ""}
+      <div class="dots" id="dots"></div>
+      <div class="arrows">
+        <button id="prev" ${focusIdx === 0 ? "disabled" : ""}>← PREV</button>
+        <button id="next" ${focusIdx === all.length - 1 ? "disabled" : ""}>NEXT →</button>
+      </div>
+    </div>`;
+
+  document.getElementById("prev").onclick = () => { focusIdx--; renderFocus(); };
+  document.getElementById("next").onclick = () => { focusIdx++; renderFocus(); };
+  renderDots(ev, r);
+  tick();
+}
+
+// How far through the wait we are. A repeating event has an obvious span
+// — last time round to this time round. A one-off is measured from the
+// day it was added, which is the only honest starting line available.
+function renderDots(ev, r) {
+  const box = document.getElementById("dots");
+  if (!box) return;
+  if (r.dir === "since" || r.days === 0) { box.remove(); return; }
+
+  let start;
+  if (ev.repeat === "year") start = shiftYear(r.occ, r.occ.getFullYear() - 1);
+  else start = midnight(new Date(ev.created));
+  const span = daysBetween(start, r.occ);
+  if (span < 2 || r.days > span) { box.remove(); return; }
+
+  const N = 28;
+  const done = Math.round(((span - r.days) / span) * N);
+  let html = "";
+  for (let i = 0; i < N; i++) {
+    html += `<i class="${i < done ? "done" : i === done ? "now" : ""}"></i>`;
+  }
+  box.innerHTML = html;
+}
+
+// The seconds line, only where seconds mean something: an event with a
+// time on it, on the day or the day before. A countdown of seconds to a
+// date eleven months out is just noise that keeps the screen awake.
+function tick() {
+  const el = document.getElementById("ticker");
+  if (!el) return;
+  const all = sorted();
+  if (!all.length) return;
+  const [, r] = all[Math.min(focusIdx, all.length - 1)] || [];
+  if (!r || r.ms === null || r.ms < 0 || r.ms > 2 * DAY) { el.textContent = ""; return; }
+  const s = Math.floor(r.ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  el.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+// ── the list ─────────────────────────────────────────────────
+function renderList() {
+  const box = document.getElementById("list");
+  const all = sorted();
+  if (!all.length) {
+    box.innerHTML = `<div class="empty">No events yet.</div>`;
+    return;
+  }
+  let html = "", header = null;
+  all.forEach(([ev, r], i) => {
+    const grp = r.days >= 0 ? "COMING" : "GONE BY";
+    if (grp !== header) { html += `<div class="group">${grp}</div>`; header = grp; }
+    const n = r.dir === "today" ? "TODAY" : r.abs;
+    html += `
+      <div class="row ${r.dir === "since" ? "since" : ""} ${i === focusIdx ? "on" : ""}" data-id="${esc(ev.id)}">
+        <div class="n" style="${n === "TODAY" ? "font-size:13px" : ""}">${esc(String(n))}</div>
+        <div class="body">
+          <div class="t">${esc(ev.title)}</div>
+          <div class="d">${esc(fmtShort(r.occ))}${ev.repeat === "year" ? " · YEARLY" : ""}${ev.time ? " · " + esc(ev.time) : ""}</div>
+        </div>
+        <button class="bell ${ev.alert ? "on" : ""}" data-bell="${esc(ev.id)}" title="Milestone alerts">●</button>
+        <button class="edit" data-edit="${esc(ev.id)}">EDIT</button>
+      </div>`;
+  });
+  box.innerHTML = html;
+
+  // The row itself is the way to say "show me this one" — the count is
+  // what you came for. Editing is the rarer thing, so it gets its own
+  // small target rather than the whole row.
+  box.querySelectorAll(".row").forEach((el) => {
+    el.onclick = () => {
+      focusIdx = sorted().findIndex(([x]) => x.id === el.dataset.id);
+      show("count");
+      renderFocus();
+      renderList();
+    };
+  });
+  box.querySelectorAll(".edit").forEach((el) => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      openForm(events.find((x) => x.id === el.dataset.edit));
+    };
+  });
+  box.querySelectorAll(".bell").forEach((el) => {
+    el.onclick = async (e) => {
+      e.stopPropagation();
+      const ev = events.find((x) => x.id === el.dataset.bell);
+      ev.alert = !ev.alert;
+      await putEvent(ev);
+      if (ev.alert && !prefs.alerts) toast("Turn alerts on in SETTINGS");
+      await refresh();
+    };
+  });
+}
+
+// ── the form ─────────────────────────────────────────────────
+function openForm(ev) {
+  editing = ev || null;
+  const f = document.getElementById("form");
+  f.classList.remove("hide"); f.style.display = "flex";
+  document.getElementById("btnNew").classList.add("hide");
+  document.getElementById("fTitle").value = ev ? ev.title : "";
+  document.getElementById("fDate").value = ev ? ev.date : todayISO();
+  document.getElementById("fTime").value = ev && ev.time ? ev.time : "";
+  document.getElementById("fNote").value = ev && ev.note ? ev.note : "";
+  formRepeat = ev ? (ev.repeat || "none") : "none";
+  document.querySelectorAll("#fRepeat button").forEach((b) => b.classList.toggle("on", b.dataset.v === formRepeat));
+  document.getElementById("fSave").textContent = ev ? "SAVE CHANGES" : "SAVE";
+  let del = document.getElementById("fDelete");
+  if (del) del.remove();
+  if (ev) {
+    del = document.createElement("button");
+    del.type = "button"; del.id = "fDelete"; del.className = "ghost danger"; del.textContent = "DELETE";
+    del.onclick = async () => {
+      if (!confirm(`Delete “${ev.title}”?`)) return;
+      await delEvent(ev.id); closeForm(); await refresh(); toast("Deleted");
+    };
+    f.appendChild(del);
+  }
+  document.getElementById("fTitle").focus();
+}
+function closeForm() {
+  const f = document.getElementById("form");
+  f.classList.add("hide"); f.style.display = "none";
+  document.getElementById("btnNew").classList.remove("hide");
+  editing = null;
+}
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ── alerts ───────────────────────────────────────────────────
+// Same bargain as the nudges in Sonic Moments, for the same reason:
+// Web Push would be precise but needs a server that knows your dates,
+// and this app refuses to have one. Periodic Background Sync means
+// Chrome wakes the installed app when it feels like it and the worker
+// works out whether a milestone has passed since it last looked.
+async function setAlerts(on) {
+  if (on) {
+    if (!("Notification" in window)) { toast("This browser can't"); return; }
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { toast("Permission refused"); return; }
+    const reg = await navigator.serviceWorker.ready;
+    try {
+      if ("periodicSync" in reg) {
+        const s = await navigator.permissions.query({ name: "periodic-background-sync" });
+        if (s.state === "granted") await reg.periodicSync.register("countdown", { minInterval: 6 * 3600 * 1000 });
+      }
+    } catch (err) { /* not installed, or unsupported — the toggle still works, it just won't fire */ }
+  } else {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if ("periodicSync" in reg) await reg.periodicSync.unregister("countdown");
+    } catch (err) {}
+  }
+  prefs.alerts = on;
+  await savePrefs(prefs);
+  await refresh();
+}
+
+async function alertState() {
+  const el = document.getElementById("alertState");
+  const bits = [];
+  const flagged = events.filter((e) => e.alert).length;
+  bits.push(`<b>${flagged}</b> event${flagged === 1 ? "" : "s"} flagged with the bell.`);
+  if (!("Notification" in window)) bits.push("Notifications unsupported here.");
+  else bits.push(`Permission: <b>${Notification.permission}</b>.`);
+  const standalone = matchMedia("(display-mode: standalone)").matches;
+  if (!standalone) bits.push("Add to home screen and open it from there — Chrome only wakes installed apps.");
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (!("periodicSync" in reg)) bits.push("Background wake-ups unsupported: alerts will only appear while the app is open.");
+    else {
+      const tags = await reg.periodicSync.getTags();
+      bits.push(tags.includes("countdown") ? "Background wake-ups registered." : "Background wake-ups not registered yet.");
+    }
+  } catch (err) {}
+  el.innerHTML = bits.join("<br>");
+}
+
+// The badge is the closest a web app gets to a home screen widget: a
+// number on the icon, if the launcher feels like drawing it.
+async function syncBadge() {
+  try {
+    if (!("setAppBadge" in navigator)) return;
+    if (!prefs.badge) { await navigator.clearAppBadge(); return; }
+    const all = sorted();
+    const next = all.find(([, r]) => r.days >= 0);
+    if (next) await navigator.setAppBadge(next[1].days);
+    else await navigator.clearAppBadge();
+  } catch (err) {}
+}
+
+// ── backup ───────────────────────────────────────────────────
+// A plain JSON file, written by the browser straight to the phone's
+// downloads. Nothing is uploaded; there is nowhere to upload it to.
+function exportBackup() {
+  const blob = new Blob([JSON.stringify({ app: "day-count", version: 1, exported: Date.now(), events }, null, 2)],
+    { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `day-count-${todayISO()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast("Exported");
+}
+async function importBackup(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || !Array.isArray(data.events)) throw new Error("not a Day Count backup");
+    let n = 0;
+    for (const raw of data.events) {
+      if (!raw || typeof raw.title !== "string" || typeof raw.date !== "string") continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) continue;
+      await putEvent({
+        id: raw.id || crypto.randomUUID(),
+        title: raw.title.slice(0, 80),
+        date: raw.date,
+        time: /^\d{2}:\d{2}$/.test(raw.time || "") ? raw.time : null,
+        repeat: raw.repeat === "year" ? "year" : "none",
+        note: typeof raw.note === "string" ? raw.note.slice(0, 200) : "",
+        alert: !!raw.alert,
+        marked: Array.isArray(raw.marked) ? raw.marked : [],
+        created: raw.created || Date.now(),
+      });
+      n++;
+    }
+    await refresh();
+    toast(`Imported ${n}`);
+  } catch (err) {
+    toast("Couldn't read that file");
+  }
+}
+
+// ── plumbing ─────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let toastT;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg; el.classList.add("on");
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove("on"), 2200);
+}
+function show(v) {
+  view = v;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  document.getElementById("viewCount").classList.toggle("hide", v !== "count");
+  document.getElementById("viewEvents").classList.toggle("hide", v !== "events");
+  document.getElementById("viewSettings").classList.toggle("hide", v !== "settings");
+  if (v !== "events") closeForm();
+  if (v === "settings") alertState();
+}
+
+async function refresh() {
+  events = await loadEvents();
+  document.getElementById("todayStamp").textContent = fmtShort(new Date());
+  renderFocus();
+  renderList();
+  document.getElementById("alertToggle").classList.toggle("on", !!prefs.alerts);
+  document.getElementById("badgeToggle").classList.toggle("on", !!prefs.badge);
+  document.getElementById("storeInfo").innerHTML =
+    `<b>${events.length}</b> event${events.length === 1 ? "" : "s"} stored on this device.`;
+  if (view === "settings") alertState();
+  syncBadge();
+}
+
+async function init() {
+  db = await openDB();
+  prefs = await loadPrefs();
+  await refresh();
+
+  document.querySelectorAll("nav button").forEach((b) => b.onclick = () => show(b.dataset.view));
+  document.getElementById("btnNew").onclick = () => openForm(null);
+  document.getElementById("fCancel").onclick = closeForm;
+  document.querySelectorAll("#fRepeat button").forEach((b) => b.onclick = () => {
+    formRepeat = b.dataset.v;
+    document.querySelectorAll("#fRepeat button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+
+  document.getElementById("form").onsubmit = async (e) => {
+    e.preventDefault();
+    const title = document.getElementById("fTitle").value.trim();
+    const date = document.getElementById("fDate").value;
+    if (!title || !date) { toast("Needs a name and a date"); return; }
+    const ev = {
+      id: editing ? editing.id : crypto.randomUUID(),
+      title,
+      date,
+      time: document.getElementById("fTime").value || null,
+      repeat: formRepeat,
+      note: document.getElementById("fNote").value.trim(),
+      alert: editing ? !!editing.alert : false,
+      // which milestones have already been announced, so a run of
+      // background wake-ups doesn't say the same thing four times
+      marked: editing ? (editing.marked || []) : [],
+      created: editing ? editing.created : Date.now(),
+    };
+    await putEvent(ev);
+    closeForm();
+    focusIdx = Math.max(0, sorted().findIndex(([x]) => x.id === ev.id));
+    await refresh();
+    toast(editing ? "Saved" : "Added");
+  };
+
+  document.getElementById("alertToggle").onclick = () => setAlerts(!prefs.alerts);
+  document.getElementById("badgeToggle").onclick = async () => {
+    prefs.badge = !prefs.badge;
+    await savePrefs(prefs);
+    await refresh();
+  };
+  document.getElementById("btnExport").onclick = exportBackup;
+  document.getElementById("btnImport").onclick = () => document.getElementById("fileImport").click();
+  document.getElementById("fileImport").onchange = (e) => {
+    if (e.target.files[0]) importBackup(e.target.files[0]);
+    e.target.value = "";
+  };
+
+  setInterval(tick, 1000);
+
+  // A countdown that says 12 all evening and still says 12 at breakfast
+  // is broken, and phones sit on standby for days. Re-reckon whenever
+  // the app comes back to the front, and once an hour while it's up.
+  let lastDay = todayISO();
+  const rollover = () => { if (todayISO() !== lastDay) { lastDay = todayISO(); refresh(); } };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) rollover(); });
+  setInterval(rollover, 60000);
+
+  // the long-press shortcut on the home screen icon lands here
+  if (new URLSearchParams(location.search).has("new")) { show("events"); openForm(null); }
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+init();
+</script>
+</body>
+</html>

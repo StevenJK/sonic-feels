@@ -105,6 +105,12 @@ One quirk to expect once it's deployed: the service worker serves its cached cop
 and refreshes in the background, so a change shows up the *second* time the app is
 opened, not the first.
 
+## Also in here
+
+**[Day Count](countdown/)** — days until, days since. A separate one-file app in
+`countdown/`, built to the same rule: everything on the device, no network calls
+at all. It shares nothing with this one but the approach.
+
 ---
 
 A personal project, built for one phone. Fork it freely; it isn't looking for features.
