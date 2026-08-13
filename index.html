@@ -197,7 +197,14 @@
     <div style="height:10px"></div>
     <div style="display:flex; gap:10px;">
       <button class="ghost" id="btnShare" style="flex:1">SHARE AS VIDEO</button>
-      <button class="ghost" id="btnShazam" style="flex:1">LOOP FOR SHAZAM</button>
+      <button class="ghost" id="btnSaveAudio" style="flex:1">SAVE AUDIO</button>
+    </div>
+    <div style="height:8px"></div>
+    <button class="ghost" id="btnShazam" style="width:100%">LOOP OUT LOUD</button>
+    <div class="meta" id="idHint" style="margin-top:10px">
+      Naming a song: save the audio and upload it to an identifier, or loop it out loud
+      and Shazam it from another device — Shazam on this phone pauses the loop the moment
+      it starts listening, so it only ever hears silence.
     </div>
     <div class="meta hide" id="shazamHint" style="margin-top:10px"></div>
     <div style="height:10px"></div>
@@ -337,6 +344,7 @@ const els = {
   jMeta: $("jMeta"), btnJourney: $("btnJourney"), jEmpty: $("jEmpty"),
   btnNudge: $("btnNudge"), btnNudgeTest: $("btnNudgeTest"), nudgeMeta: $("nudgeMeta"),
   btnShazam: $("btnShazam"), shazamHint: $("shazamHint"),
+  btnSaveAudio: $("btnSaveAudio"), idHint: $("idHint"),
 };
 
 // ── state ────────────────────────────────────────────────────
@@ -796,15 +804,73 @@ function stopPlayback() {
   }
 }
 
-// ── loop it for Shazam ───────────────────────────────────────
-// Shazam can't be handed a file — it listens through the microphone. So
-// the way to identify music in a clip is to play it out loud on repeat,
-// which leaves time to switch apps and let Shazam hear a few passes.
-// Nothing is uploaded and no key is needed; the recording stays here.
+// ── getting a song named ─────────────────────────────────────
+// Two routes, because the obvious one doesn't work.
 //
-// MediaSession is what makes this survive being backgrounded: it tells
-// Android this is real media playback rather than a page making noise,
-// so the audio keeps going once you've switched to Shazam.
+// Shazam can't be handed a file — it listens through the microphone —
+// so the plan was to play the clip out loud and let it listen. On the
+// same phone that fails, by design: a recogniser takes exclusive audio
+// focus, Android pauses everything else, and the loop stops the instant
+// Shazam starts. (Echo cancellation on the mic input would undo it even
+// if it didn't.) Verified on a real phone with Spotify, not just here.
+//
+// So: SAVE AUDIO writes the clip out as a WAV to upload to an identifier
+// that accepts files, and the loop stays for playing to a *second*
+// device. MediaSession keeps the loop alive across an app switch — it
+// just can't win an argument with an app that wants the audio to stop.
+//
+// Nothing is uploaded by the app itself. No key, no account, no server.
+
+// Recognition-friendly WAV: peak-normalised to LOOP_TARGET, so it lands
+// well under full scale and can't clip. Up to stereo, 16-bit, at the
+// buffer's own rate — the plainest thing every uploader accepts.
+function audioBufferToWav(buf, gain) {
+  const chans = Math.min(buf.numberOfChannels, 2);
+  const len = buf.length, rate = buf.sampleRate;
+  const total = 44 + len * chans * 2;
+  const out = new ArrayBuffer(total);
+  const v = new DataView(out);
+  const tag = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  tag(0, "RIFF"); v.setUint32(4, total - 8, true); tag(8, "WAVE");
+  tag(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, chans, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * chans * 2, true); v.setUint16(32, chans * 2, true); v.setUint16(34, 16, true);
+  tag(36, "data"); v.setUint32(40, len * chans * 2, true);
+
+  const data = [];
+  for (let c = 0; c < chans; c++) data.push(buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < chans; c++) {
+      const s = Math.max(-1, Math.min(1, data[c][i] * gain));
+      v.setInt16(o, s * 32767, true);
+      o += 2;
+    }
+  }
+  return new Blob([out], { type: "audio/wav" });
+}
+
+els.btnSaveAudio.onclick = async () => {
+  if (!decoded) { alert("Sound is still decoding — try again in a second."); return; }
+  els.btnSaveAudio.disabled = true;
+  els.btnSaveAudio.textContent = "WRITING…";
+  const wav = audioBufferToWav(decoded, boost * (LOOP_TARGET / PEAK_TARGET));
+  const name = "sonic-moment-" +
+    new Date(current ? current.t : Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".wav";
+  const file = new File([wav], name, { type: "audio/wav" });
+  els.btnSaveAudio.disabled = false;
+  els.btnSaveAudio.textContent = "SAVE AUDIO";
+
+  // share sheet where there is one — it also covers saving to Files and
+  // sending the clip to another device — otherwise a plain download
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { /* cancelled */ }
+  }
+  const url = URL.createObjectURL(wav);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+};
 // Recognition wants a different chain from listening. Ordinary replay
 // normalises hard and limits at ratio 20, which on a quiet ambient
 // recording pumps and flattens — and the peaks it flattens are exactly
@@ -829,8 +895,9 @@ function stopLoop() {
     } catch (e) {}
   }
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none";
-  els.btnShazam.textContent = "LOOP FOR SHAZAM";
+  els.btnShazam.textContent = "LOOP OUT LOUD";
   els.shazamHint.classList.add("hide");
+  els.idHint.classList.remove("hide");
 }
 
 els.btnShazam.onclick = async () => {
@@ -868,9 +935,11 @@ els.btnShazam.onclick = async () => {
 
   els.btnShazam.textContent = "STOP LOOPING";
   els.shazamHint.textContent =
-    "Playing on repeat. Turn the volume up, open Shazam and let it listen — it hears the speaker, so a quiet room helps. Stops on its own after " +
+    "Playing on repeat. Listen from another device — a laptop, a second phone — with the volume up and the room quiet. " +
+    "Shazam on this phone will pause it instead of hearing it. Stops on its own after " +
     (LOOP_MAX / 60000) + " minutes.";
   els.shazamHint.classList.remove("hide");
+  els.idHint.classList.add("hide");
   loopTimer = setTimeout(stopLoop, LOOP_MAX);
 };
 

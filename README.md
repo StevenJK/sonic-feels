@@ -44,10 +44,14 @@ worth catching and want more of it. The choice is remembered.
 were. Tap one to replay it, or render it as a video for sharing — a slow Ken Burns
 drift over the still with the sound underneath, sized for Instagram.
 
-There's also `LOOP FOR SHAZAM`, for when a moment caught music you want named. Shazam
-can't be handed a file — it listens through the microphone — so this plays the clip out
-loud on repeat, giving you time to switch apps and let it hear a few passes. No upload,
-no account, no key: the recording stays on the phone and Shazam just hears the speaker.
+When a moment caught music you want named, there are two ways out. `SAVE AUDIO` writes
+the clip as a WAV, normalised and ready to upload to any identifier that accepts files.
+`LOOP OUT LOUD` plays it on repeat for a *second* device to listen to.
+
+Not one device, though: a recogniser takes exclusive audio focus, so Android pauses the
+loop the moment Shazam starts listening and it hears nothing at all. Same reason Shazam
+can't identify what your own Spotify is playing. Neither route uploads anything from the
+app itself — no key, no account, no server.
 
 **Journey** — the point of the whole thing. Moments group themselves into trips by
 time, and dragging the scrubber moves through one: the photo, the place on the trace

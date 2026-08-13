@@ -32,9 +32,10 @@ No accounts, no backend, no analytics. Do not add any.
 - **Backup** — export/import all moments as one JSON file (blobs base64'd).
 - **Share** — renders a real video (canvas + muxed audio via MediaRecorder,
   1080x1350, slow Ken Burns) for Instagram. Prefers mp4, falls back to webm.
-- **Identify music** — `LOOP FOR SHAZAM` plays the clip out loud on repeat so Shazam
-  can hear it through the mic while you switch apps. MediaSession is what keeps it
-  playing once the app is backgrounded. Nothing is uploaded; no key, no account.
+- **Identify music** — `SAVE AUDIO` writes the clip out as a peak-normalised WAV to
+  upload to an identifier that takes files (AudD, ACRCloud both have web uploaders).
+  `LOOP OUT LOUD` plays it on repeat for a *second* device to listen to. See constraint
+  13 for why the same phone can't. Nothing is uploaded by the app; no key, no account.
 - **Capture length** — 10 / 20 / 30s on the capture screen, remembered in `prefs`.
   Ten is the everyday default; the longer ones are for when there's music worth
   catching, since Shazam gains from *different* passages, not repeated ones.
@@ -112,7 +113,17 @@ These cost many rounds of debugging. Every one is load-bearing.
     fingerprinter keys on. The loop aims at `LOOP_TARGET` (0.7) through a soft-knee
     ratio-4 limiter instead: quieter, much less mangled. Don't tidy these into one.
 
-13. **The service worker only ever touches our own files.** It ignores anything that
+13. **A recogniser on this phone cannot hear this phone. Don't rebuild that.** The
+    obvious design — loop the clip out loud, let Shazam listen — was built and it does
+    not work, confirmed on the real device against Spotify as well as against us.
+    Android gives a recogniser exclusive audio focus, which *pauses* all other playback
+    the instant it starts listening, so it hears silence. Echo cancellation on the mic
+    input would cancel the speaker anyway. MediaSession keeps the loop alive across an
+    app switch but can't win against an app that asks for the audio to stop. The two
+    routes that do work are a file (`SAVE AUDIO` → upload) and a second device
+    (`LOOP OUT LOUD` → Shazam from a laptop).
+
+14. **The service worker only ever touches our own files.** It ignores anything that
    isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
    and `data:` URLs the camera, the player and the backup importer pass around. It is
    still true that the app makes zero calls to anything but itself.
