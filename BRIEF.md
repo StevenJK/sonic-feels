@@ -36,6 +36,11 @@ No accounts, no backend, no analytics. Do not add any.
   upload to an identifier that takes files (AudD, ACRCloud both have web uploaders).
   `LOOP OUT LOUD` plays it on repeat for a *second* device to listen to. See constraint
   13 for why the same phone can't. Nothing is uploaded by the app; no key, no account.
+  AHA Music is what actually works: upload the WAV there, it names the track.
+- **Song links** — once something else has named the track, `ADD SONG LINK` on a moment
+  stores whatever you paste: `music: { label, url, at }`. One free-text field — any URL
+  in it becomes the link, the rest becomes the label. Shows on the moment, as a `♪` line
+  in the library, and in the journey readout.
 - **Capture length** — 10 / 20 / 30s on the capture screen, remembered in `prefs`.
   Ten is the everyday default; the longer ones are for when there's music worth
   catching, since Shazam gains from *different* passages, not repeated ones.
@@ -123,7 +128,19 @@ These cost many rounds of debugging. Every one is load-bearing.
     routes that do work are a file (`SAVE AUDIO` → upload) and a second device
     (`LOOP OUT LOUD` → Shazam from a laptop).
 
-14. **The service worker only ever touches our own files.** It ignores anything that
+14. **Store the song link, never embed it.** A pasted URL is inert — the app holds a
+    string, and tapping it is the browser leaving. Album art, a Spotify preview player
+    or anything that *renders* the track would mean a request to someone else's server
+    every time a moment is opened, and the zero-network rule is gone for a thumbnail.
+    Only `http:`/`https:` links are ever turned into anchors, and labels go in with
+    `textContent`, because the text is whatever got pasted.
+
+15. **`exportBackup` and `importBackup` list every field by hand.** Anything added to a
+    moment must be added in both, or it survives on the phone and silently vanishes on
+    the next backup round trip — the worst kind of bug, since it only shows up when
+    restoring. `music` is in both. Check this whenever the atom shape changes.
+
+16. **The service worker only ever touches our own files.** It ignores anything that
    isn't a same-origin `http(s)` GET, which deliberately keeps it away from the `blob:`
    and `data:` URLs the camera, the player and the backup importer pass around. It is
    still true that the app makes zero calls to anything but itself.

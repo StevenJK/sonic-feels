@@ -129,6 +129,13 @@ precisely what makes the browser a well-behaved media app that *obeys* the pause
 So it became two honest routes instead: export the clip as a normalised WAV to upload to
 an identifier that accepts files, or loop it out loud for a *second* device to hear.
 
+**The postscript is the happy bit.** Uploading the exported WAV to AHA Music works
+reliably, so a moment can now carry its song: paste the link back onto the moment and it
+stays there, shown in the library and the journey. Which means the feature ended up
+better than the original plan — the recognition happens outside the app entirely, so
+there's still no key, no proxy and nothing uploaded by the app, and the answer is stored
+permanently rather than living in a browser tab. The dead end was worth walking into.
+
 ## Things worth taking away
 
 - **The awkward code was the load-bearing code.** Almost every strange-looking decision

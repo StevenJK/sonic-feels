@@ -53,6 +53,12 @@ loop the moment Shazam starts listening and it hears nothing at all. Same reason
 can't identify what your own Spotify is playing. Neither route uploads anything from the
 app itself — no key, no account, no server.
 
+Once something has named the track, `ADD SONG LINK` puts it back on the moment. Paste a
+link on its own, or an artist and title alongside it, and the moment carries it from then
+on — shown when you play it, marked in the library, and in the journey readout. The app
+stores the text and nothing more; it never contacts Spotify, and tapping the link is your
+browser leaving rather than the app reaching out.
+
 **Journey** — the point of the whole thing. Moments group themselves into trips by
 time, and dragging the scrubber moves through one: the photo, the place on the trace
 and the sound all change together. `PLAY JOURNEY` walks a whole trip on its own.

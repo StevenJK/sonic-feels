@@ -139,6 +139,23 @@
   #jScrub::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
   #jScrub::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); border: none; }
   #jScrub:disabled { opacity: .35; }
+
+  /* ── song link on a moment ── */
+  .musicline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .musicline .note { color: var(--accent); font-size: 14px; }
+  .musicline a {
+    color: var(--accent); font-family: var(--mono); font-size: 12px; line-height: 1.5;
+    text-decoration: none; border-bottom: 1px solid rgba(224, 137, 95, .4);
+    overflow-wrap: anywhere;
+  }
+  .musicline .plain { font-family: var(--mono); font-size: 12px; opacity: .75; overflow-wrap: anywhere; }
+  #musicInput {
+    width: 100%; background: var(--card); color: var(--paper);
+    border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  #musicInput::placeholder { color: rgba(244, 239, 230, .35); }
+  .songmark { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -209,6 +226,15 @@
     <div class="meta hide" id="shazamHint" style="margin-top:10px"></div>
     <div style="height:10px"></div>
     <div class="meta" id="playMeta"></div>
+    <div id="musicBox" style="margin-top:12px"></div>
+    <div id="musicEdit" class="hide" style="margin-top:12px">
+      <input type="text" id="musicInput" placeholder="Paste a link — or Artist — Title and the link">
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="ghost" id="musicPaste" style="flex:1">PASTE</button>
+        <button class="ghost" id="musicSave" style="flex:1">SAVE</button>
+        <button class="ghost" id="musicCancel">✕</button>
+      </div>
+    </div>
     <audio id="playAudio" preload="auto"></audio>
   </section>
 
@@ -345,6 +371,8 @@ const els = {
   btnNudge: $("btnNudge"), btnNudgeTest: $("btnNudgeTest"), nudgeMeta: $("nudgeMeta"),
   btnShazam: $("btnShazam"), shazamHint: $("shazamHint"),
   btnSaveAudio: $("btnSaveAudio"), idHint: $("idHint"),
+  musicBox: $("musicBox"), musicEdit: $("musicEdit"), musicInput: $("musicInput"),
+  musicPaste: $("musicPaste"), musicSave: $("musicSave"), musicCancel: $("musicCancel"),
 };
 
 // ── state ────────────────────────────────────────────────────
@@ -597,6 +625,13 @@ async function renderLibrary() {
     thumb.alt = "moment thumbnail";
     const txt = document.createElement("div");
     txt.innerHTML = '<div class="t">' + fmtWhen(a.t) + '</div><div class="d">' + fmtCoord(a) + "</div>";
+    if (a.music) {
+      // textContent, not innerHTML — the label is whatever got pasted in
+      const song = document.createElement("div");
+      song.className = "d songmark";
+      song.textContent = "♪ " + a.music.label;
+      txt.appendChild(song);
+    }
     const del = document.createElement("button");
     del.className = "del"; del.textContent = "×"; del.setAttribute("aria-label", "Delete this moment");
     del.onclick = async (e) => {
@@ -709,6 +744,7 @@ function openPlayer(atom) {
   els.playMeta.innerHTML =
     "captured " + fmtWhen(atom.t) + "<br>" + fmtCoord(atom) + "<br>" +
     (atom.frames?.length || 0) + " frames · decoding sound…";
+  renderMusic();
 
   // decode the clip's audio up front
   els.btnPlay.disabled = true;
@@ -803,6 +839,112 @@ function stopPlayback() {
     srcNode = null;
   }
 }
+
+// ── the song, once something else has named it ───────────────
+// Identification happens outside the app — save the audio, upload it to
+// something that recognises music, get an answer. This is the way back
+// in: paste whatever you ended up with onto the moment and it stays
+// there. The app stores a string. It never contacts Spotify or anyone
+// else; tapping the link is the browser leaving, not the app reaching
+// out. Keep it that way — album art or an embedded player would mean a
+// request to someone else's server every time you opened a moment.
+//
+// One free-text field on purpose: paste just a URL when you're being
+// quick, or "Artist — Title <link>" when you want the moment to read
+// properly. Whatever isn't a URL becomes the label.
+function parseMusic(raw) {
+  const text = (raw || "").trim();
+  if (!text) return null;
+  const found = text.match(/https?:\/\/\S+/i);
+  let url = null;
+  if (found) {
+    try {
+      const u = new URL(found[0]);
+      // only ever linkify real web links — never javascript: or data:
+      if (u.protocol === "http:" || u.protocol === "https:") url = u.href;
+    } catch (e) { /* not a usable URL, treat it as text */ }
+  }
+  let label = found ? text.replace(found[0], "") : text;
+  label = label.replace(/[\s—–|·-]+$/, "").replace(/^[\s—–|·-]+/, "").trim();
+  if (!label && url) {
+    try { label = new URL(url).hostname.replace(/^www\./, ""); } catch (e) { label = url; }
+  }
+  return { label: label || text, url, at: Date.now() };
+}
+
+function renderMusic() {
+  els.musicBox.innerHTML = "";
+  els.musicEdit.classList.add("hide");
+  els.musicBox.classList.remove("hide");
+  const m = current && current.music;
+
+  if (!m) {
+    const add = document.createElement("button");
+    add.className = "ghost";
+    add.style.width = "100%";
+    add.textContent = "ADD SONG LINK";
+    add.onclick = () => openMusicEdit("");
+    els.musicBox.appendChild(add);
+    return;
+  }
+
+  const line = document.createElement("div");
+  line.className = "musicline";
+  const note = document.createElement("span");
+  note.className = "note";
+  note.textContent = "♪";
+  line.appendChild(note);
+
+  if (m.url) {
+    const a = document.createElement("a");
+    a.href = m.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = m.label;
+    line.appendChild(a);
+  } else {
+    const s = document.createElement("span");
+    s.className = "plain";
+    s.textContent = m.label;
+    line.appendChild(s);
+  }
+
+  const edit = document.createElement("button");
+  edit.className = "ghost";
+  edit.style.cssText = "margin-left:auto; padding:6px 12px; font-size:11px;";
+  edit.textContent = "EDIT";
+  edit.onclick = () => openMusicEdit(((m.label || "") + " " + (m.url || "")).trim());
+  line.appendChild(edit);
+  els.musicBox.appendChild(line);
+}
+
+function openMusicEdit(prefill) {
+  els.musicBox.classList.add("hide");
+  els.musicEdit.classList.remove("hide");
+  els.musicInput.value = prefill;
+  els.musicInput.focus();
+}
+
+// The link is almost always already in the clipboard, and long-pressing
+// to paste on a phone is fiddly enough to be worth a button.
+els.musicPaste.onclick = async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (t) els.musicInput.value = (els.musicInput.value + " " + t).trim();
+  } catch (e) {
+    els.musicInput.focus();          // clipboard refused: paste it by hand
+  }
+};
+
+els.musicSave.onclick = async () => {
+  if (!current) return;
+  const parsed = parseMusic(els.musicInput.value);
+  if (parsed) current.music = parsed; else delete current.music;   // emptied = removed
+  await db.put(current);
+  renderMusic();
+};
+
+els.musicCancel.onclick = () => renderMusic();
 
 // ── getting a song named ─────────────────────────────────────
 // Two routes, because the obvious one doesn't work.
@@ -962,8 +1104,11 @@ async function exportBackup() {
   const out = [];
   for (const a of atoms) {
     out.push({
+      // every field is listed by hand here, so anything added to a moment
+      // has to be added here and in importBackup too — or it silently
+      // disappears on the next export/import round trip
       id: a.id, t: a.t, lat: a.lat, lng: a.lng, acc: a.acc,
-      seconds: a.seconds, mode: a.mode || "frames",
+      seconds: a.seconds, mode: a.mode || "frames", music: a.music || null,
       audio: a.audio ? await blobToDataURL(a.audio) : null,
       frames: a.frames ? await Promise.all(a.frames.map(blobToDataURL)) : [],
     });
@@ -989,12 +1134,14 @@ async function importBackup(file) {
     const existing = new Set((await db.all()).map((a) => a.id));
     for (const a of data.atoms) {
       if (existing.has(a.id)) continue;      // never overwrite what's here
-      await db.put({
+      const restored = {
         id: a.id, t: a.t, lat: a.lat, lng: a.lng, acc: a.acc,
         seconds: a.seconds, mode: a.mode,
         audio: a.audio ? await dataURLToBlob(a.audio) : null,
         frames: await Promise.all((a.frames || []).map(dataURLToBlob)),
-      });
+      };
+      if (a.music) restored.music = a.music;   // older backups simply won't have one
+      await db.put(restored);
       added++;
     }
     alert("Imported " + added + " moment" + (added === 1 ? "" : "s") + ".");
@@ -1260,7 +1407,8 @@ function setIndex(i) {
   els.jScrub.value = i;
   if (jThumbs[i]) els.jFrame.src = jThumbs[i];
   els.jBadge.textContent = String(i + 1).padStart(2, "0") + " / " + String(trip.length).padStart(2, "0");
-  els.jMeta.innerHTML = fmtWhen(a.t) + "<br>" + fmtCoord(a);
+  els.jMeta.textContent = fmtWhen(a.t) + "\n" + fmtCoord(a) + (a.music ? "\n♪ " + a.music.label : "");
+  els.jMeta.style.whiteSpace = "pre-line";
   drawJourneyMap(i);
 }
 
