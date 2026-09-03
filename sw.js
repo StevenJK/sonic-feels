@@ -13,7 +13,7 @@
 // Bump this after changing index.html or garage-log/index.html. Not
 // strictly required — the app shell refreshes itself on the next open
 // either way — but bumping it throws the old copy away cleanly.
-const VERSION = "v4";
+const VERSION = "v5";
 const CACHE = "sonic-moments-" + VERSION;
 
 const SHELL = [

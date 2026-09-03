@@ -4,16 +4,39 @@
   "description": "Fuel, service, repairs and parts for a vehicle — odometer, cost and a photo, kept on this device.",
   "start_url": "./",
   "scope": "./",
-  "id": "./",
+  "id": "/sonic-feels/garage-log/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f5f1e8",
   "theme_color": "#d4622a",
-  "categories": ["utilities", "productivity"],
+  "categories": [
+    "utilities",
+    "productivity"
+  ],
   "icons": [
-    { "src": "../icons/garage-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "../icons/garage-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "../icons/garage-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "../icons/garage-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "../icons/garage-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "../icons/garage-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "../icons/garage-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "../icons/garage-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
