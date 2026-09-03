@@ -28,6 +28,19 @@ The flip side of that: your moments are only ever on your phone. Clearing site d
 the domain in Chrome's settings deletes them for good, so `EXPORT BACKUP` writes the
 whole lot to a single file worth keeping somewhere.
 
+## Garage Log
+
+A second small app lives alongside this one at
+[`/garage-log/`](https://stevenjk.github.io/sonic-feels/garage-log/) — a running log of
+fuel, servicing, repairs and parts for a vehicle: date, odometer, cost, a note and a
+photo. It is built on the same terms as Sonic Moments and shares its service worker, so
+it installs to the home screen, opens with no signal, and keeps everything in IndexedDB
+on the device. `Export backup` writes the lot to a JSON file.
+
+Photos are downscaled to 1280px on the longest edge before they are stored, because a
+full-size phone photo is several megabytes once it is base64 and the browser will not
+hold many of those.
+
 ## Using it
 
 **Capture** — two modes:

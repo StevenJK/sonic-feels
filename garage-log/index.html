@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Garage Log</title>
+<meta name="description" content="Fuel, service, repairs and parts for a vehicle. Kept on this device.">
+<meta name="theme-color" content="#d4622a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="../icons/garage-apple-touch.png">
+<link rel="icon" href="../icons/garage-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Garage">
 <style>
   :root { --ink:#1a1712; --paper:#f5f1e8; --accent:#d4622a; --line:#c9c2b2; --dim:#6b6455; }
   * { box-sizing:border-box; }
@@ -18,9 +25,10 @@
   button[disabled] { opacity:.5; cursor:default; }
   .entry { border:1px solid var(--line); border-radius:6px; padding:.7rem;
            margin:.6rem 0; background:#fff; }
-  .entry .head { display:flex; align-items:baseline; gap:.5rem; }
-  .entry .meta { font-family:monospace; font-size:.8rem; color:var(--dim); flex:1; }
-  .entry .cost { font-family:monospace; }
+  .entry .head { display:flex; flex-wrap:wrap; align-items:baseline; gap:.15rem .5rem; }
+  .entry .meta { font-family:monospace; font-size:.8rem; color:var(--dim); flex:1 1 auto; }
+  .entry .right { margin-left:auto; white-space:nowrap; }
+  .entry .cost { font-family:monospace; margin-right:.3rem; }
   .entry .note { margin-top:.3rem; white-space:pre-wrap; }
   .entry img { max-width:100%; border-radius:4px; margin-top:.5rem; }
   .del { background:none; color:#a33; font-size:.85rem; padding:.2rem .3rem; }
@@ -144,7 +152,7 @@ function render() {
       const meta = document.createElement('span');
       meta.className = 'meta';
       meta.textContent = en.date.slice(0, 10) + ' · ' + en.type +
-        (en.odo != null ? ' · ' + en.odo.toLocaleString() + ' km' : '');
+        (en.odo != null ? ' \u00b7 ' + en.odo.toLocaleString() + '\u00a0km' : '');
 
       const cost = document.createElement('span');
       cost.className = 'cost';
@@ -156,7 +164,12 @@ function render() {
       del.textContent = 'delete';
       del.onclick = () => remove(en.id, en.type, en.date);
 
-      head.append(meta, cost, del);
+      // Cost and delete travel together, so a long meta line pushes the
+      // pair onto its own row rather than stranding the button.
+      const right = document.createElement('span');
+      right.className = 'right';
+      right.append(cost, del);
+      head.append(meta, right);
       div.appendChild(head);
 
       if (en.note) {
@@ -185,6 +198,10 @@ function remove(id, type, date) {
   tx.objectStore(STORE).delete(id);
   tx.oncomplete = render;
   tx.onerror = () => status('Could not delete that entry.');
+}
+
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('../sw.js').catch(() => {}));
 }
 
 function exportJSON() {

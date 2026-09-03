@@ -1,6 +1,8 @@
 "use strict";
 // ═══════════════════════════════════════════════════════════════
-// SONIC MOMENTS — service worker.
+// SONIC MOMENTS — service worker. Also serves Garage Log at
+// /garage-log/, which is a separate installable app but sits on this
+// same origin, so one worker at the site root covers both.
 // Its only job is to keep this app's own files on the device so it
 // opens with no signal at all. It touches nothing but the files listed
 // below, all from this same origin: no third-party requests, no
@@ -8,10 +10,10 @@
 // involved — those live in IndexedDB and never leave the phone.
 // ═══════════════════════════════════════════════════════════════
 
-// Bump this after changing index.html. Not strictly required — the app
-// shell refreshes itself on the next open either way — but bumping it
-// throws the old copy away cleanly.
-const VERSION = "v3";
+// Bump this after changing index.html or garage-log/index.html. Not
+// strictly required — the app shell refreshes itself on the next open
+// either way — but bumping it throws the old copy away cleanly.
+const VERSION = "v4";
 const CACHE = "sonic-moments-" + VERSION;
 
 const SHELL = [
@@ -21,6 +23,11 @@ const SHELL = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/apple-touch-icon.png",
+  "garage-log/index.html",
+  "garage-log/manifest.webmanifest",
+  "icons/garage-192.png",
+  "icons/garage-512.png",
+  "icons/garage-apple-touch.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -56,8 +63,9 @@ self.addEventListener("fetch", (e) => {
 
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
+      const shell = url.pathname.includes("/garage-log") ? "garage-log/index.html" : "index.html";
       const hit = await cache.match(req, { ignoreSearch: true })
-        || (req.mode === "navigate" ? await cache.match("index.html") : null);
+        || (req.mode === "navigate" ? await cache.match(shell) : null);
 
       const fresh = fetch(req)
         .then((res) => {
