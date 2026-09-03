@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garage Log</title>
+<style>
+  :root { --ink:#1a1712; --paper:#f5f1e8; --accent:#d4622a; --line:#c9c2b2; --dim:#6b6455; }
+  * { box-sizing:border-box; }
+  body { font-family:Georgia,serif; background:var(--paper); color:var(--ink);
+         margin:0; padding:1rem; max-width:600px; margin-inline:auto; }
+  h1 { font-size:1.4rem; border-bottom:2px solid var(--accent); padding-bottom:.4rem; }
+  form { display:grid; gap:.6rem; margin:1rem 0; }
+  input, select, textarea { font:inherit; padding:.5rem; border:1px solid var(--line);
+         border-radius:4px; background:#fff; width:100%; }
+  button { font:inherit; background:var(--accent); color:#fff; border:0;
+           border-radius:4px; padding:.6rem 1rem; cursor:pointer; }
+  button[disabled] { opacity:.5; cursor:default; }
+  .entry { border:1px solid var(--line); border-radius:6px; padding:.7rem;
+           margin:.6rem 0; background:#fff; }
+  .entry .head { display:flex; align-items:baseline; gap:.5rem; }
+  .entry .meta { font-family:monospace; font-size:.8rem; color:var(--dim); flex:1; }
+  .entry .cost { font-family:monospace; }
+  .entry .note { margin-top:.3rem; white-space:pre-wrap; }
+  .entry img { max-width:100%; border-radius:4px; margin-top:.5rem; }
+  .del { background:none; color:#a33; font-size:.85rem; padding:.2rem .3rem; }
+  #summary, #status { font-family:monospace; font-size:.85rem; color:var(--dim); }
+  #status:empty { display:none; }
+</style>
+</head>
+<body>
+<h1>Garage Log</h1>
+<form id="f">
+  <select id="type" required>
+    <option>Fuel</option><option>Service</option><option>Repair</option>
+    <option>Part</option><option>Inspection</option><option>Other</option>
+  </select>
+  <input type="number" id="odo" placeholder="Odometer (km)" step="1" min="0" inputmode="numeric">
+  <input type="number" id="cost" placeholder="Cost" step="0.01" min="0" inputmode="decimal">
+  <textarea id="note" rows="2" placeholder="Notes"></textarea>
+  <input type="file" id="photo" accept="image/*" capture="environment">
+  <button id="save" disabled>Save entry</button>
+</form>
+<p id="status"></p>
+<p id="summary"></p>
+<div id="list"></div>
+<p><button onclick="exportJSON()" style="background:#6b6455">Export backup</button></p>
+
+<script>
+'use strict';
+const DB = 'garage-log';
+const STORE = 'entries';
+const CURRENCY = '$';          // NZD; entries carry no currency of their own
+const PHOTO_MAX_PX = 1280;     // longest edge kept, to keep IndexedDB sane
+const PHOTO_QUALITY = 0.75;
+
+let db = null;
+const $ = id => document.getElementById(id);
+const status = msg => { $('status').textContent = msg || ''; };
+
+const req = indexedDB.open(DB, 1);
+req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, {keyPath:'id', autoIncrement:true});
+req.onsuccess = e => {
+  db = e.target.result;
+  db.onerror = ev => status('Storage error: ' + (ev.target.error && ev.target.error.message));
+  $('save').disabled = false;
+  render();
+};
+req.onerror = () => status('Could not open local storage. Private browsing?');
+
+function add(entry, done) {
+  const tx = db.transaction(STORE, 'readwrite');
+  tx.objectStore(STORE).add(entry);
+  tx.oncomplete = () => { render(); if (done) done(); };
+  tx.onerror = () => status('Could not save that entry — storage may be full.');
+}
+
+function all(cb) {
+  const tx = db.transaction(STORE, 'readonly');
+  const rq = tx.objectStore(STORE).getAll();
+  rq.onsuccess = () => cb(rq.result.sort((a, b) => b.id - a.id));
+  rq.onerror = () => status('Could not read entries.');
+}
+
+// Blank stays blank; a real 0 stays 0.
+function num(el) {
+  const raw = el.value.trim();
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Full-size phone photos are megabytes each as base64. Downscale before storing.
+function shrinkPhoto(file, cb) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const scale = Math.min(1, PHOTO_MAX_PX / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * scale);
+    c.height = Math.round(img.height * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    cb(c.toDataURL('image/jpeg', PHOTO_QUALITY));
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); cb(null); };
+  img.src = url;
+}
+
+$('f').onsubmit = e => {
+  e.preventDefault();
+  if (!db) return;
+  const form = e.target;
+  const photoFile = $('photo').files[0];
+  const save = photoData => {
+    add({
+      date: new Date().toISOString(),
+      type: $('type').value,
+      odo: num($('odo')),
+      cost: num($('cost')),
+      note: $('note').value,
+      photo: photoData || null
+    }, () => { form.reset(); $('save').disabled = false; status(''); });
+  };
+  $('save').disabled = true;
+  if (photoFile) { status('Processing photo…'); shrinkPhoto(photoFile, save); }
+  else save(null);
+};
+
+function render() {
+  all(entries => {
+    const list = $('list');
+    list.textContent = '';
+    let total = 0;
+    for (const en of entries) {
+      total += en.cost || 0;
+
+      const div = document.createElement('div');
+      div.className = 'entry';
+
+      const head = document.createElement('div');
+      head.className = 'head';
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = en.date.slice(0, 10) + ' · ' + en.type +
+        (en.odo != null ? ' · ' + en.odo.toLocaleString() + ' km' : '');
+
+      const cost = document.createElement('span');
+      cost.className = 'cost';
+      cost.textContent = en.cost != null ? CURRENCY + en.cost.toFixed(2) : '';
+
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.type = 'button';
+      del.textContent = 'delete';
+      del.onclick = () => remove(en.id, en.type, en.date);
+
+      head.append(meta, cost, del);
+      div.appendChild(head);
+
+      if (en.note) {
+        const p = document.createElement('div');
+        p.className = 'note';
+        p.textContent = en.note;      // textContent, so notes can never inject markup
+        div.appendChild(p);
+      }
+      if (en.photo) {
+        const img = document.createElement('img');
+        img.src = en.photo;
+        img.alt = '';
+        img.loading = 'lazy';
+        div.appendChild(img);
+      }
+      list.appendChild(div);
+    }
+    $('summary').textContent =
+      entries.length + ' entries · lifetime spend ' + CURRENCY + total.toFixed(2);
+  });
+}
+
+function remove(id, type, date) {
+  if (!confirm('Delete the ' + type + ' entry from ' + date.slice(0, 10) + '?')) return;
+  const tx = db.transaction(STORE, 'readwrite');
+  tx.objectStore(STORE).delete(id);
+  tx.oncomplete = render;
+  tx.onerror = () => status('Could not delete that entry.');
+}
+
+function exportJSON() {
+  if (!db) return;
+  all(entries => {
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(entries, null, 2)], {type:'application/json'}));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'garage-log-backup.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+</script>
+</body>
+</html>
